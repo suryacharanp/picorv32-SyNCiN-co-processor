@@ -1,4 +1,4 @@
-module divider(
+module divider_fp32(
         input_a,
         input_b,
         div_input_STB,
@@ -13,14 +13,14 @@ module divider(
   input     clk;
   input     rst;
 
-  input     [15:0] input_a;
-  input     [15:0] input_b;
+  input     [31:0] input_a;
+  input     [31:0] input_b;
 
   input     div_input_STB;
   output    div_BUSY;
   
 
-  output    [15:0] output_div;
+  output    [31:0] output_div;
   output    div_output_STB;
   input     output_module_BUSY;
 
@@ -63,8 +63,8 @@ module divider(
       begin
         div_BUSY_reg <= 0;
         if (!(div_BUSY_reg) && div_input_STB) begin  //Once it gets valid input take that input and start processing.
-          a <= {input_a, 16'b0};
-          b <= {input_b, 16'b0};
+          a <= input_a;
+          b <= input_b;
           div_BUSY_reg <= 1; //Turn the BUSY signal on, BUSY = 1 because now it will be busy processing latched inputs and can no more take inputs even if it is valid. 
           div_state <= unpack;
         end
@@ -322,6 +322,6 @@ module divider(
   
   assign div_BUSY = div_BUSY_reg;
   assign div_output_STB = div_output_STB_reg;
-  assign output_div = output_div_reg[31:16];
+  assign output_div = output_div_reg;
 
 endmodule:divider

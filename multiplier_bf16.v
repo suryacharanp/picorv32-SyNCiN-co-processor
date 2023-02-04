@@ -1,4 +1,4 @@
-module multiplier(
+module multiplier_bf16(
         input_a,
         input_b,
         mult_input_STB,
@@ -25,7 +25,7 @@ module multiplier(
 
   //Intermediate registers
   reg       mult_output_STB_reg;
-  reg       [31:0] output_mult_reg;
+  reg       [15:0] output_mult_reg;
   reg       mult_BUSY_reg;
 
   reg       [3:0] mult_state;
@@ -42,8 +42,8 @@ module multiplier(
             pack          = 4'd10,
             put_z         = 4'd11;
 
-  reg       [31:0] a, b, z;
-  reg       [23:0] a_m, b_m, z_m;
+  reg       [15:0] a, b, z;
+  reg       [7:0] a_m, b_m, z_m;
   reg       [9:0] a_e, b_e, z_e;
   reg       a_s, b_s, z_s;
   reg       guard, round_bit, sticky;
@@ -59,8 +59,8 @@ module multiplier(
       begin
         mult_BUSY_reg <= 0;
         if (!(mult_BUSY_reg) && mult_input_STB) begin  //Once it gets valid input take that input and start processing.
-          a <= {input_a, 16'b0};
-		  b <= {input_b, 16'b0};
+          a <= {input_a};
+		  b <= {input_b};
           mult_BUSY_reg <= 1; //Turn the BUSY signal on, BUSY = 1 because now it will be busy processing latched inputs and can no more take inputs even if it is valid. 
           mult_state <= unpack;
         end
@@ -68,12 +68,12 @@ module multiplier(
 
       unpack:
       begin
-        a_m <= a[22 : 0];
-        b_m <= b[22 : 0];
-        a_e <= a[30 : 23] - 127;
-        b_e <= b[30 : 23] - 127;
-        a_s <= a[31];
-        b_s <= b[31];
+        a_m <= a[6 : 0];
+        b_m <= b[6 : 0];
+        a_e <= a[14 : 7] - 127;
+        b_e <= b[14 : 7] - 127;
+        a_s <= a[15];
+        b_s <= b[15];
         mult_state <= special_cases;
       end
 
@@ -81,61 +81,61 @@ module multiplier(
       begin
         //if a is NaN or b is NaN return NaN 
         if ((a_e == 128 && a_m != 0) || (b_e == 128 && b_m != 0)) begin
-          z[31] <= 1;
-          z[30:23] <= 255;
-          z[22] <= 1;
-          z[21:0] <= 0;
+          z[15] <= 1;
+          z[14:7] <= 255;
+          z[6] <= 1;
+          z[5:0] <= 0;
           mult_state <= put_z;
         //if a is inf return inf
         end else if (a_e == 128) begin
-          z[31] <= a_s ^ b_s;
-          z[30:23] <= 255;
-          z[22:0] <= 0;
+          z[15] <= a_s ^ b_s;
+          z[14:7] <= 255;
+          z[6:0] <= 0;
           //if b is zero return NaN
           if (($signed(b_e) == -127) && (b_m == 0)) begin
-            z[31] <= 1;
-            z[30:23] <= 255;
-            z[22] <= 1;
-            z[21:0] <= 0;
+            z[15] <= 1;
+            z[14:7] <= 255;
+            z[6] <= 1;
+            z[5:0] <= 0;
           end
           mult_state <= put_z;
         //if b is inf return inf
         end else if (b_e == 128) begin
-          z[31] <= a_s ^ b_s;
-          z[30:23] <= 255;
-          z[22:0] <= 0;
+          z[15] <= a_s ^ b_s;
+          z[14:7] <= 255;
+          z[6:0] <= 0;
           //if a is zero return NaN
           if (($signed(a_e) == -127) && (a_m == 0)) begin
-            z[31] <= 1;
-            z[30:23] <= 255;
-            z[22] <= 1;
-            z[21:0] <= 0;
+            z[15] <= 1;
+            z[14:7] <= 255;
+            z[6] <= 1;
+            z[5:0] <= 0;
           end
           mult_state <= put_z;
         //if a is zero return zero
         end else if (($signed(a_e) == -127) && (a_m == 0)) begin
-          z[31] <= a_s ^ b_s;
-          z[30:23] <= 0;
-          z[22:0] <= 0;
+          z[15] <= a_s ^ b_s;
+          z[14:7] <= 0;
+          z[6:0] <= 0;
           mult_state <= put_z;
         //if b is zero return zero
         end else if (($signed(b_e) == -127) && (b_m == 0)) begin
-          z[31] <= a_s ^ b_s;
-          z[30:23] <= 0;
-          z[22:0] <= 0;
+          z[15] <= a_s ^ b_s;
+          z[14:7] <= 0;
+          z[6:0] <= 0;
           mult_state <= put_z;
         end else begin
           //Denormalised Number
           if ($signed(a_e) == -127) begin
             a_e <= -126;
           end else begin
-            a_m[23] <= 1;
+            a_m[7] <= 1;
           end
           //Denormalised Number
           if ($signed(b_e) == -127) begin
             b_e <= -126;
           end else begin
-            b_m[23] <= 1;
+            b_m[7] <= 1;
           end
           mult_state <= normalise_a;
         end
@@ -143,7 +143,7 @@ module multiplier(
 
       normalise_a:
       begin
-        if (a_m[23]) begin
+        if (a_m[7]) begin
           mult_state <= normalise_b;
         end else begin
           a_m <= a_m << 1;
@@ -153,7 +153,7 @@ module multiplier(
 
       normalise_b:
       begin
-        if (b_m[23]) begin
+        if (b_m[7]) begin
           mult_state <= multiply_0;
         end else begin
           b_m <= b_m << 1;
@@ -180,7 +180,7 @@ module multiplier(
 
       normalise_1:
       begin
-        if (z_m[23] == 0) begin
+        if (z_m[7] == 0) begin
           z_e <= z_e - 1;
           z_m <= z_m << 1;
           z_m[0] <= guard;
@@ -208,7 +208,7 @@ module multiplier(
       begin
         if (guard && (round_bit | sticky | z_m[0])) begin
           z_m <= z_m + 1;
-          if (z_m == 24'hffffff) begin
+          if (z_m == 8'hff) begin
             z_e <=z_e + 1;
           end
         end
@@ -217,17 +217,17 @@ module multiplier(
 
       pack:
       begin
-        z[22 : 0] <= z_m[22:0];
-        z[30 : 23] <= z_e[7:0] + 127;
-        z[31] <= z_s;
-        if ($signed(z_e) == -126 && z_m[23] == 0) begin
-          z[30 : 23] <= 0;
+        z[6 : 0] <= z_m[6:0];
+        z[14 : 7] <= z_e[7:0] + 127;
+        z[15] <= z_s;
+        if ($signed(z_e) == -126 && z_m[7] == 0) begin
+          z[14 : 7] <= 0;
         end
         //if overflow occurs, return inf
         if ($signed(z_e) > 127) begin
-          z[22 : 0] <= 0;
-          z[30 : 23] <= 255;
-          z[31] <= z_s;
+          z[6 : 0] <= 0;
+          z[14 : 7] <= 255;
+          z[15] <= z_s;
         end
         mult_state <= put_z;
       end

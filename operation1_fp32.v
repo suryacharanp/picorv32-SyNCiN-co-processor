@@ -1,4 +1,4 @@
-module operation1(
+module operation1_fp32(
     clk,
     rst,
     input_a,
@@ -15,15 +15,15 @@ module operation1(
    input clk;
    input rst;
    
-   input [15:0] input_a;
-   input [15:0] input_b;
-   input [15:0] input_c;
-   input [15:0] input_d;
+   input [31:0] input_a;
+   input [31:0] input_b;
+   input [31:0] input_c;
+   input [31:0] input_d;
    
    input     op1_input_STB;
    output    op1_BUSY;
   
-   output    [15:0] output_result;
+   output    [31:0] output_result;
   
    output    op1_output_STB;
    input     output_module_BUSY;
@@ -31,10 +31,10 @@ module operation1(
 
 
 reg mult_input_STB1, mult_BUSY1;
-reg [15:0] result1;
+reg [31:0] result1;
 reg output_STB1, output_BUSY1;
-reg [15:0] a, b;
-multiplier_bf16 mult_inst1 (
+reg [31:0] a, b;
+multiplier mult_inst1 (
         .input_a(a),
         .input_b(b),
         .mult_input_STB(mult_input_STB1),
@@ -47,10 +47,10 @@ multiplier_bf16 mult_inst1 (
 		);
 
 reg mult_input_STB2, mult_BUSY2;
-reg [15:0] result2;
+reg [31:0] result2;
 reg output_STB2, output_BUSY2;
-reg [15:0] c, d;
-multiplier_bf16 mult_inst2 (
+reg [31:0] c, d;
+multiplier mult_inst2 (
         .input_a(c),
         .input_b(d),
         .mult_input_STB(mult_input_STB2),
@@ -63,11 +63,11 @@ multiplier_bf16 mult_inst2 (
 		);
 
 reg adder_input_STB, adder_BUSY;
-reg [15:0] output_result_reg;
+reg [31:0] output_result_reg;
 reg adder_output_STB, adder_output_module_BUSY;
-reg [15:0] result1_reg, result2_reg;
+reg [31:0] result1_reg, result2_reg;
 
-adder_bf16 adder_inst
+adder adder_inst
         (
         .input_a(result1_reg),
         .input_b(result2_reg),
@@ -84,7 +84,7 @@ adder_bf16 adder_inst
 //reg [31:0] a,b,c,d;
 //reg mult_input_STB1, mult_input_STB2;
 reg op1_BUSY_reg, op1_output_STB_reg;
-reg [15:0] output_result_temp;
+reg [31:0] output_result_temp;
 
 assign output_result = output_result_temp; 
 assign op1_output_STB =  op1_output_STB_reg;
@@ -225,4 +225,5 @@ end
 
 
 endmodule : operation1
+
 

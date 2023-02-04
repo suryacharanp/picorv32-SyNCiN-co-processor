@@ -1,4 +1,4 @@
-module adder(
+module adder_fp32(
         input_a,
         input_b,
 		    adder_input_STB,
@@ -13,14 +13,14 @@ module adder(
   input     clk;
   input     rst;
 
-  input     [15:0] input_a;
+  input     [31:0] input_a;
 
-  input     [15:0] input_b;
+  input     [31:0] input_b;
   
   input     adder_input_STB;
   output    adder_BUSY;
   
-  output    [15:0] output_sum;
+  output    [31:0] output_sum;
   
   output    adder_output_STB;
   input     output_module_BUSY;
@@ -61,8 +61,8 @@ module adder(
       begin
         adder_BUSY_reg <= 0;
         if (!(adder_BUSY_reg) && adder_input_STB) begin  //Once it gets valid input take that input and start processing.
-          a <= {input_a, 16'b0};
-		      b <= {input_b, 16'b0};
+          a <= input_a;
+		      b <= input_b;
           adder_BUSY_reg <= 1; //Turn the BUSY signal on, BUSY = 1 because now it will be busy processing latched inputs and can no more take inputs even if it is valid. 
           adder_state <= unpack;
         end
@@ -294,6 +294,6 @@ module adder(
   
   assign adder_BUSY = adder_BUSY_reg;
   assign adder_output_STB = adder_output_STB_reg;
-  assign output_sum = output_sum_reg[31:16];
+  assign output_sum = output_sum_reg;
 
 endmodule:adder

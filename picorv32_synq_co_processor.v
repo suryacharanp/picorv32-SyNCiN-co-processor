@@ -43,14 +43,15 @@ wire [15:0] result_op1;
 
 
 
-// reg [31:0] oper1_op1_fp32, oper2_op1_fp32, oper3_op1_fp32, oper4_op1_fp32;
-// reg op1_inp_STB_fp32;
-// wire op1_BUSY_reg_fp32;
+reg [31:0] oper1_op1_fp32, oper2_op1_fp32, oper3_op1_fp32, oper4_op1_fp32;
+reg [31:0] oper1_fp32_temp_1. oper1_fp32_temp_2;
+reg op1_inp_STB_fp32;
+wire op1_BUSY_reg_fp32;
 
-// wire [31:0] result_op1_fp32;
+wire [31:0] result_op1_fp32;
 
-// reg op1_out_STB_fp32;
-// reg out_op1_BUSY_fp32;
+reg op1_out_STB_fp32;
+reg out_op1_BUSY_fp32;
 
 
 
@@ -121,19 +122,19 @@ operation1 op1_inst(
     .output_module_BUSY(out_op1_BUSY)
    );
 
-  //  operation1_FP32 op1_inst_fp32(
-  //   .clk(clk),
-  //   .rst(rst),
-  //   .input_a(oper1_op1_fp32),
-  //   .input_b(oper2_op1_fp32),
-  //   .input_c(oper3_op1_fp32),
-  //   .input_d(oper4_op1_fp32),
-  //   .op1_input_STB(op1_inp_STB_fp32),
-  //   .op1_BUSY(op1_BUSY_reg_fp32),
-  //   .output_result(result_op1_fp32),
-  //   .op1_output_STB(op1_out_STB_fp32),
-  //   .output_module_BUSY(out_op1_BUSY_fp32)
-  //  );
+   operation1_fp32 op1_inst_fp32(
+    .clk(clk),
+    .rst(rst),
+    .input_a(oper1_op1_fp32),
+    .input_b(oper2_op1_fp32),
+    .input_c(oper3_op1_fp32),
+    .input_d(oper4_op1_fp32),
+    .op1_input_STB(op1_inp_STB_fp32),
+    .op1_BUSY(op1_BUSY_reg_fp32),
+    .output_result(result_op1_fp32),
+    .op1_output_STB(op1_out_STB_fp32),
+    .output_module_BUSY(out_op1_BUSY_fp32)
+   );
    
 
 operation2 op2_inst(
@@ -311,22 +312,36 @@ begin
                       current_state <= EXE_OP5;
                     end
                 end
-              //     3'b101 : 
-              //  begin
-              //       oper1_op1_fp32 <= rs1_oper[31:16];
-              //       oper2_op1_fp32 <= rs1_oper[15:0];
-              //       oper3_op1_fp32 <= rs2_oper[31:16];
-              //       oper4_op1_fp32 <= rs2_oper[15:0];
-              //       input_op3 <= rs1_oper[31];
+                  3'b101 : 
+               begin
+                    oper1_fp32_temp_1 <= rs1_oper[31:0];
+                    oper1_fp32_temp_2 <= rs2_oper[31:0];
+                
                     
-              //       op1_inp_STB_fp32 <= 1;
+                    op1_inp_STB_fp32 <= 0;
  
-              //       if(op1_inp_STB_fp32 && op1_BUSY_reg_fp32) 
-              //       begin
-              //         op1_inp_STB_fp32 <= 0;
-              //         current_state <= EXE_OP1_fp32;
-              //       end
-              //   end
+                    if(op1_inp_STB_fp32 && op1_BUSY_reg_fp32) 
+                    begin
+                      op1_inp_STB_fp32 <= 0;
+                      current_state <= EXE_OP1_fp32;
+                    end
+                end
+                3'b111 : 
+               begin
+                    oper1_op1_fp32 <= oper1_fp32_temp_1[31:0];
+                    oper2_op1_fp32 <= oper1_fp32_temp_2[31:0];
+                    oper3_op1_fp32 <= rs2_oper[31:0];
+                    oper4_op1_fp32 <= rs1_oper[31:0];
+                    input_op3 <= oper1_fp32_temp_1[31];
+                    
+                    op1_inp_STB_fp32 <= 1;
+ 
+                    if(op1_inp_STB_fp32 && op1_BUSY_reg_fp32) 
+                    begin
+                      op1_inp_STB_fp32 <= 0;
+                      current_state <= EXE_OP1_fp32;
+                    end
+                end
                 
                 
                 
@@ -393,16 +408,16 @@ begin
                 current_state        <= WB;
            end//
        end   
-    // EXE_OP1_fp32:
-    //    begin
-    //        out_op1_BUSY_fp32 <= 0;
-    //        if (op1_out_STB_fp32 && !out_op1_BUSY_fp32)
-    //        begin//
-    //             out_op1_BUSY_fp32         <= 1;
-    //             result               <= result_op1_fp32;
-    //             current_state        <= WB;
-    //        end//
-    //    end 
+    EXE_OP1_fp32:
+       begin
+           out_op1_BUSY_fp32 <= 0;
+           if (op1_out_STB_fp32 && !out_op1_BUSY_fp32)
+           begin//
+                out_op1_BUSY_fp32         <= 1;
+                result               <= result_op1_fp32;
+                current_state        <= WB;
+           end//
+       end 
        
        
       
@@ -426,6 +441,7 @@ begin
     // ready_reg           <= 1; //op status ready - 1
     
     op1_inp_STB         <= 0; //no valid input to operation1 module
+    op1_inp_STB_fp32    <= 0; //no valid input to operation1 module
     op2_inp_STB         <= 0; //no valid input to operation2 module
     op3_inp_STB         <= 0; //no valid input to operation3 module
     op4_inp_STB         <= 0; //no valid input to operation4 module
