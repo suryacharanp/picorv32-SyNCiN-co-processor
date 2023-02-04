@@ -34,7 +34,7 @@ reg mult_input_STB1, mult_BUSY1;
 reg [31:0] result1;
 reg output_STB1, output_BUSY1;
 reg [31:0] a, b;
-multiplier mult_inst1 (
+multiplier_fp32 mult_inst1 (
         .input_a(a),
         .input_b(b),
         .mult_input_STB(mult_input_STB1),
@@ -50,7 +50,7 @@ reg mult_input_STB2, mult_BUSY2;
 reg [31:0] result2;
 reg output_STB2, output_BUSY2;
 reg [31:0] c, d;
-multiplier mult_inst2 (
+multiplier_fp32 mult_inst2 (
         .input_a(c),
         .input_b(d),
         .mult_input_STB(mult_input_STB2),
@@ -67,7 +67,7 @@ reg [31:0] output_result_reg;
 reg adder_output_STB, adder_output_module_BUSY;
 reg [31:0] result1_reg, result2_reg;
 
-adder adder_inst
+adder_fp32 adder_inst
         (
         .input_a(result1_reg),
         .input_b(result2_reg),
