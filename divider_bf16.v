@@ -322,6 +322,6 @@ module divider_bf16(
   
   assign div_BUSY = div_BUSY_reg;
   assign div_output_STB = div_output_STB_reg;
-  assign output_div = output_div_reg[31:16];
+  assign output_div = output_div_reg[15:0];
 
-endmodule:divider
+endmodule:divider_bf16

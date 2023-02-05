@@ -224,6 +224,6 @@ end
 end
 
 
-endmodule : operation1
+endmodule : operation1_fp32
 
 
