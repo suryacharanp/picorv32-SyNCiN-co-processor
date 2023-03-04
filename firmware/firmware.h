@@ -22,6 +22,7 @@ void print_hex(unsigned int val, int digits);
 
 // hello.c
 void hello(void);
+uint32_t operation (uint32_t a, uint32_t b, uint32_t c, uint32_t d,uint32_t e);
 
 // sieve.c
 void sieve(void);

@@ -283,4 +283,4 @@ module multiplier_bf16(
   assign mult_output_STB = mult_output_STB_reg;
   assign output_mult = output_mult_reg[15:0];
 
-endmodule : multiplier_bf16
+endmodule 

@@ -296,4 +296,4 @@ module adder_fp32(
   assign adder_output_STB = adder_output_STB_reg;
   assign output_sum = output_sum_reg;
 
-endmodule:adder_fp32
+endmodule

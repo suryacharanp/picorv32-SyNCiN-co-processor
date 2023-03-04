@@ -34,14 +34,21 @@ reg mult_input_STB1, mult_BUSY1;
 reg [15:0] result1;
 reg output_STB1, output_BUSY1;
 reg [15:0] a, b;
+wire mult_BUSY1_w, mult_input_STB1_w;
+wire [15:0] result1_w;
+wire mult_BUSY2_w, mult_input_STB2_w;
+wire [15:0] result2_w;
+// wire mult_BUSY1_w, mult_input_STB1_w;
+// wire [15:0] result1_w;
+
 multiplier_bf16 mult_inst1 (
         .input_a(a),
         .input_b(b),
         .mult_input_STB(mult_input_STB1),
-        .mult_BUSY(mult_BUSY1),
+        .mult_BUSY(mult_BUSY1_w),
         .clk(clk),
         .rst(rst),
-        .output_mult(result1),
+        .output_mult(result1_w),
         .mult_output_STB(output_STB1),
         .output_module_BUSY(output_BUSY1)
 		);
@@ -54,16 +61,18 @@ multiplier_bf16 mult_inst2 (
         .input_a(c),
         .input_b(d),
         .mult_input_STB(mult_input_STB2),
-        .mult_BUSY(mult_BUSY2),
+        .mult_BUSY(mult_BUSY2_w),
         .clk(clk),
         .rst(rst),
-        .output_mult(result2),
-        .mult_output_STB(output_STB2),
+        .output_mult(result2_w),
+        .mult_output_STB(output_STB2_W),
         .output_module_BUSY(output_BUSY2)
 		);
 
 reg adder_input_STB, adder_BUSY;
 reg [15:0] output_result_reg;
+wire [15:0] output_result_reg_w;
+wire adder_BUSY_w, adder_output_STB_w;
 reg adder_output_STB, adder_output_module_BUSY;
 reg [15:0] result1_reg, result2_reg;
 
@@ -72,11 +81,11 @@ adder_bf16 adder_inst
         .input_a(result1_reg),
         .input_b(result2_reg),
 		.adder_input_STB(adder_input_STB),
-		.adder_BUSY(adder_BUSY),
+		.adder_BUSY(adder_BUSY_w),
         .clk(clk),
         .rst(rst),
-		.output_sum(output_result_reg),
-        .adder_output_STB(adder_output_STB),
+		.output_sum(output_result_reg_w),
+        .adder_output_STB(adder_output_STB_w),
         .output_module_BUSY(adder_output_module_BUSY)
 		);
 
@@ -90,6 +99,14 @@ assign output_result = output_result_temp;
 assign op1_output_STB =  op1_output_STB_reg;
 assign op1_BUSY = op1_BUSY_reg;
 
+assign adder_output_STB = adder_output_STB_w;
+assign adder_output_STB = adder_output_STB_w;
+assign output_result_reg = output_result_reg_w;
+
+assign result1 = result1_w;
+assign result2 = result2_w;
+assign mult_BUSY1 = mult_BUSY1_w;
+assign mult_BUSY2 = mult_BUSY2_w;
 
 
 

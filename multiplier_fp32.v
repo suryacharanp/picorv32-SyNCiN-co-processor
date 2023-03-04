@@ -283,4 +283,4 @@ module multiplier_fp32(
   assign mult_output_STB = mult_output_STB_reg;
   assign output_mult = output_mult_reg;
 
-endmodule : multiplier_fp32
+endmodule 

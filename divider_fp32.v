@@ -324,4 +324,4 @@ module divider_fp32(
   assign div_output_STB = div_output_STB_reg;
   assign output_div = output_div_reg;
 
-endmodule:divider
+endmodule:divider_fp32

@@ -302,6 +302,8 @@ module TB;
       @(posedge clk);
       //$display("Reg[%0d] = %0h (hex), %0f (float)", destination, rocc_accel_inst.reg_inst.Registers[destination], $bitstoshortreal(rocc_accel_inst.reg_inst.Registers[destination]));
       reg_a = rocc_accel_inst.reg_inst.Registers[destination];
+
+      //
         
       
       give_reset();

@@ -72,7 +72,7 @@ module picosoc (
 	parameter [0:0] BARREL_SHIFTER = 1;
 	parameter [0:0] ENABLE_MUL = 1;
 	parameter [0:0] ENABLE_DIV = 1;
-	parameter [0:0] ENABLE_FAST_MUL = 0;
+	parameter [0:0] ENABLE_FAST_MUL = 1;
 	parameter [0:0] ENABLE_COMPRESSED = 1;
 	parameter [0:0] ENABLE_COUNTERS = 1;
 	parameter [0:0] ENABLE_IRQ_QREGS = 0;

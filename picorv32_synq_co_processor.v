@@ -44,7 +44,7 @@ wire [15:0] result_op1;
 
 
 reg [31:0] oper1_op1_fp32, oper2_op1_fp32, oper3_op1_fp32, oper4_op1_fp32;
-reg [31:0] oper1_fp32_temp_1. oper1_fp32_temp_2;
+reg [31:0] oper1_fp32_temp_1, oper1_fp32_temp_2;
 reg op1_inp_STB_fp32;
 wire op1_BUSY_reg_fp32;
 

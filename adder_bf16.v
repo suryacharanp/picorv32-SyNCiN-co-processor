@@ -294,6 +294,6 @@ module adder_bf16(
   
   assign adder_BUSY = adder_BUSY_reg;
   assign adder_output_STB = adder_output_STB_reg;
-  assign output_sum = output_sum_reg[31:16];
+  assign output_sum = output_sum_reg[15:0];
 
 endmodule:adder

@@ -72,9 +72,9 @@ module picorv32 #(
 	parameter [ 0:0] COMPRESSED_ISA = 0,
 	parameter [ 0:0] CATCH_MISALIGN = 1,
 	parameter [ 0:0] CATCH_ILLINSN = 1,
-	parameter [ 0:0] ENABLE_PCPI = 0,
+	parameter [ 0:0] ENABLE_PCPI = 1,
 	parameter [ 0:0] ENABLE_MUL = 0,
-	parameter [ 0:0] ENABLE_FAST_MUL = 0,
+	parameter [ 0:0] ENABLE_FAST_MUL = 1,
 	parameter [ 0:0] ENABLE_DIV = 0,
 	parameter [ 0:0] ENABLE_IRQ = 0,
 	parameter [ 0:0] ENABLE_IRQ_QREGS = 1,
@@ -270,7 +270,7 @@ module picorv32 #(
 	reg        pcpi_int_ready;
 
 	generate if (ENABLE_FAST_MUL) begin
-		picorv32_pcpi_fast_mul pcpi_mul (
+		picorv32_pcpi_mul pcpi_mul (
 			.clk       (clk            ),
 			.resetn    (resetn         ),
 			.pcpi_valid(pcpi_valid     ),
@@ -303,9 +303,9 @@ module picorv32 #(
 	end endgenerate
 
 	generate if (ENABLE_DIV) begin
-		picorv32_pcpi_div pcpi_div (
+		picorv32_synq_co_processor pcpi_synq (
 			.clk       (clk            ),
-			.resetn    (resetn         ),
+			.rst    (resetn         ),
 			.pcpi_valid(pcpi_valid     ),
 			.pcpi_insn (pcpi_insn      ),
 			.pcpi_rs1  (pcpi_rs1       ),
@@ -2175,7 +2175,7 @@ module picorv32_regs (
 	output [31:0] rdata1,
 	output [31:0] rdata2
 );
-	reg [31:0] regs [0:30];
+	reg [31:0] regs [0:30];(* parallel_case *)
 
 	always @(posedge clk)
 		if (wen) regs[~waddr[4:0]] <= wdata;
@@ -2183,6 +2183,3625 @@ module picorv32_regs (
 	assign rdata1 = regs[~raddr1[4:0]];
 	assign rdata2 = regs[~raddr2[4:0]];
 endmodule
+
+
+/***************************************************************
+ * picorv32_pcpi_synq
+ ***************************************************************/
+module picorv32_synq_co_processor(
+	clk, rst,
+	   pico_valid,
+	   pico_insn,
+	   pico_rs1,
+	     pico_rs2,
+	      pico_wr,
+	 pico_rd,
+	      pico_wait,
+	     pico_ready
+);
+reg ready_reg;
+
+parameter  IF = 4'b0000;
+parameter  ID = 4'b0001;
+parameter  EXE_OP1 = 4'b0010;
+parameter  EXE_OP2 = 4'b0011;
+parameter  EXE_OP3 = 4'b0100;
+parameter  EXE_OP4 = 4'b0101;
+parameter  EXE_OP5 = 4'b0110;
+parameter  EXE_OP1_fp32 = 4'b1000;
+parameter  WB = 4'b0111;
+
+     input clk; 
+     input rst;
+
+	input             pico_valid;
+	input      [31:0] pico_insn;
+	input      [31:0] pico_rs1;
+	input      [31:0] pico_rs2;
+	output reg        pico_wr;
+	output reg [31:0] pico_rd;
+	output reg        pico_wait;
+	output reg        pico_ready;
+
+reg [2:0] current_state;
+
+reg [15:0] oper1_op1, oper2_op1, oper3_op1, oper4_op1;
+reg op1_inp_STB;
+wire  op1_BUSY_reg;
+
+wire [15:0] result_op1;
+
+
+
+reg [31:0] oper1_op1_fp32, oper2_op1_fp32, oper3_op1_fp32, oper4_op1_fp32;
+reg [31:0] oper1_fp32_temp_1, oper1_fp32_temp_2;
+reg op1_inp_STB_fp32;
+wire op1_BUSY_reg_fp32;
+
+wire [31:0] result_op1_fp32;
+
+reg op1_out_STB_fp32;
+wire op1_out_STB_fp32_w;
+reg out_op1_BUSY_fp32;
+
+
+
+
+wire op1_out_STB;
+reg out_op1_BUSY;
+reg [15:0] oper1_op2, oper2_op2, oper3_op2, oper4_op2;
+reg op2_inp_STB;
+wire op2_BUSY_reg;
+
+wire [15:0] result_op2;
+
+wire op2_out_STB;
+reg out_op2_BUSY;
+
+
+
+
+
+reg [15:0] oper1_op3, oper2_op3, oper3_op3, oper4_op3;
+reg input_op3;
+reg op3_inp_STB;
+wire op3_BUSY_reg;
+
+wire [15:0] result_op3;
+
+wire op3_out_STB;
+reg out_op3_BUSY;
+
+
+
+
+reg [15:0] oper1_op4, oper2_op4, oper3_op4, oper4_op4;
+reg input_op4;
+reg op4_inp_STB;
+wire op4_BUSY_reg;
+
+wire [15:0] result_op4;
+
+wire op4_out_STB;
+reg out_op4_BUSY;
+
+
+
+
+reg [15:0] oper1_op5, oper2_op5, oper3_op5, oper4_op5;
+reg input_op5;
+reg op5_inp_STB;
+wire op5_BUSY_reg;
+
+wire [15:0] result_op5;
+
+wire op5_out_STB;
+reg out_op5_BUSY;
+
+
+operation1 op1_inst(
+    .clk(clk),
+    .rst(rst),
+    .input_a(oper1_op1),
+    .input_b(oper2_op1),
+    .input_c(oper3_op1),
+    .input_d(oper4_op1),
+    .op1_input_STB(op1_inp_STB),
+    .op1_BUSY(op1_BUSY_reg),
+    .output_result(result_op1),
+    .op1_output_STB(op1_out_STB),
+    .output_module_BUSY(out_op1_BUSY)
+   );
+
+   operation1_fp32 op1_inst_fp32(
+    .clk(clk),
+    .rst(rst),
+    .input_a(oper1_op1_fp32),
+    .input_b(oper2_op1_fp32),
+    .input_c(oper3_op1_fp32),
+    .input_d(oper4_op1_fp32),
+    .op1_input_STB(op1_inp_STB_fp32),
+    .op1_BUSY(op1_BUSY_reg_fp32),
+    .output_result(result_op1_fp32),
+    .op1_output_STB(op1_out_STB_fp32_w),
+    .output_module_BUSY(out_op1_BUSY_fp32)
+   );
+   
+
+operation2 op2_inst(
+    .clk(clk),
+    .rst(rst),
+    .input_a(oper1_op2),
+    .input_b(oper2_op2),
+    .input_c(oper3_op2),
+    .input_d(oper4_op2),
+    .op2_input_STB(op2_inp_STB),
+    .op2_BUSY(op2_BUSY_reg),
+    .output_result(result_op2),
+    .op2_output_STB(op2_out_STB),
+    .output_module_BUSY(out_op2_BUSY)
+   );
+
+operation3 op3_inst(
+    .clk(clk),
+    .rst(rst),
+    .input_tp(input_op3),
+    .op3_input_STB(op3_inp_STB),
+    .op3_BUSY(op3_BUSY_reg),
+    .output_x(result_op3),
+    .op3_output_STB(op3_out_STB),
+    .output_module_BUSY(out_op3_BUSY)
+);
+
+operation4 op4_inst(
+    .clk(clk),
+    .rst(rst),
+    .input_a(oper1_op4),
+    .input_b(oper2_op4),
+    .input_c(oper3_op4),
+    .input_d(oper4_op4),
+    .op4_input_STB(op4_inp_STB),
+    .op4_BUSY(op4_BUSY_reg),
+    .output_result(result_op4),
+    .op4_output_STB(op4_out_STB),
+    .output_module_BUSY(out_op4_BUSY)
+);
+
+operation5 op5_inst(
+    .clk(clk),
+    .rst(rst),
+    .input_a(oper1_op5),
+    .input_b(oper2_op5),
+    .input_c(oper3_op5),
+    .input_d(oper4_op5),
+    .op5_input_STB(op5_inp_STB),
+    .op5_BUSY(op5_BUSY_reg),
+    .output_result(result_op5),
+    .op5_output_STB(op5_out_STB),
+    .output_module_BUSY(out_op5_BUSY)
+);
+
+
+reg [6:0] funct7;
+reg [4:0] rs2_reg;
+reg [4:0] rs1_reg;
+reg xd;
+reg xs1;
+reg xs2;
+reg [4:0] rd;
+reg [1:0] opcode;
+
+reg[31:0] rs1_oper;
+reg[31:0] rs2_oper;
+
+
+reg[15:0] result;
+
+
+always@(posedge clk)//always
+begin
+pico_ready <= 0;
+pico_wr <= 0;
+pico_rd <= 'bx;
+op1_out_STB_fp32 <= op1_out_STB_fp32_w;
+if(!rst && pico_valid && !pico_ready && pico_insn[6:0] == 7'b0110011 && pico_insn[31:25] == 7'b0000001)
+begin
+    case(current_state)
+      
+    IF:
+      begin
+        ready_reg <= 1;
+        if(pico_valid && ready_reg)begin
+          ready_reg <= 0;
+           rs1_oper <= pico_rs1;
+           rs2_oper <= pico_rs2;
+           current_state <= ID;
+        end
+      end
+        
+
+    ID:
+    begin//
+      case(pico_insn[14:12])
+                3'b000 : 
+                begin
+                    oper1_op1 <= rs1_oper[31:16];
+                    oper2_op1 <= rs1_oper[15:0];
+                    oper3_op1 <= rs2_oper[31:16];
+                    oper4_op1 <= rs2_oper[15:0];
+                    input_op3 <= rs1_oper[31];
+                    
+                    op1_inp_STB <= 1;
+ 
+                    if(op1_inp_STB && op1_BUSY_reg) 
+                    begin
+                      op1_inp_STB <= 0;
+                      current_state <= EXE_OP1;
+                    end
+                end
+                
+                3'b001 : 
+                begin
+                    oper1_op2 <= rs1_oper[31:16];
+                    oper2_op2 <= rs1_oper[15:0];
+                    oper3_op2 <= rs2_oper[31:16];
+                    oper4_op2 <= rs2_oper[15:0];
+                    
+                    op2_inp_STB <= 1;
+ 
+                    if(op2_inp_STB && op2_BUSY_reg) 
+                    begin
+                      op2_inp_STB <= 0;
+                      current_state <= EXE_OP2;
+                    end
+                end
+                
+                3'b010: 
+                begin
+                    oper1_op3 <= rs2_oper[31:16];
+                    oper2_op3 <= rs1_oper[15:0];
+                    oper3_op3 <= rs2_oper[31:16];
+                    oper4_op3 <= rs2_oper[15:0];
+                    input_op3 <= rs2_oper[31];
+                    
+                    op3_inp_STB <= 1;
+ 
+                    if(op3_inp_STB && op3_BUSY_reg) 
+                    begin
+                      op3_inp_STB <= 0;
+                      current_state <= EXE_OP3;
+                    end
+                end
+                
+                3'b011 : 
+                begin
+                    oper1_op4 <= rs2_oper[31:16];
+                    oper2_op4 <= rs1_oper[15:0];
+                    oper3_op4 <= rs2_oper[31:16];
+                    oper4_op4 <= rs2_oper[15:0];
+                    
+                    op4_inp_STB <= 1;
+ 
+                    if(op4_inp_STB && op4_BUSY_reg) 
+                    begin
+                      op4_inp_STB <= 0;
+                      current_state <= EXE_OP4;
+                    end
+                end
+                
+                3'b100 : 
+                begin
+                    oper1_op5 <= rs2_oper[31:16];
+                    oper2_op5 <= rs1_oper[15:0];
+                    oper3_op5 <= rs2_oper[31:16];
+                    oper4_op5 <= rs2_oper[15:0];
+                                        
+                    op5_inp_STB <= 1;
+ 
+                    if(op5_inp_STB && op5_BUSY_reg) 
+                    begin
+                      op5_inp_STB <= 0;
+                      current_state <= EXE_OP5;
+                    end
+                end
+                  3'b101 : 
+               begin
+                    oper1_fp32_temp_1 <= rs1_oper[31:0];
+                    oper1_fp32_temp_2 <= rs2_oper[31:0];
+                
+                    
+                    op1_inp_STB_fp32 <= 0;
+ 
+                    if(op1_inp_STB_fp32 && op1_BUSY_reg_fp32) 
+                    begin
+                      op1_inp_STB_fp32 <= 0;
+                      current_state <= EXE_OP1_fp32;
+                    end
+                end
+                3'b111 : 
+               begin
+                    oper1_op1_fp32 <= oper1_fp32_temp_1[31:0];
+                    oper2_op1_fp32 <= oper1_fp32_temp_2[31:0];
+                    oper3_op1_fp32 <= rs2_oper[31:0];
+                    oper4_op1_fp32 <= rs1_oper[31:0];
+                    input_op3 <= oper1_fp32_temp_1[31];
+                    
+                    op1_inp_STB_fp32 <= 1;
+ 
+                    if(op1_inp_STB_fp32 && op1_BUSY_reg_fp32) 
+                    begin
+                      op1_inp_STB_fp32 <= 0;
+                      current_state <= EXE_OP1_fp32;
+                    end
+                end
+                
+                
+                
+      
+      endcase 
+
+      
+    end//
+       
+  
+
+    EXE_OP1:
+       begin
+           out_op1_BUSY <= 0;
+           if (op1_out_STB && !out_op1_BUSY)
+           begin//
+                out_op1_BUSY         <= 1;
+                result               <= result_op1;
+                current_state        <= WB;
+           end//
+       end 
+       
+    EXE_OP2:
+       begin
+           out_op2_BUSY <= 0;
+           if (op2_out_STB && !out_op2_BUSY)
+           begin//
+                out_op2_BUSY         <= 1;
+                result               <= result_op2;
+                current_state        <= WB;
+           end//
+       end   
+       
+    
+    EXE_OP3:
+       begin
+           out_op3_BUSY <= 0;
+           if (op3_out_STB && !out_op3_BUSY)
+           begin//
+                out_op3_BUSY         <= 1;
+                result               <= result_op3;
+                current_state        <= WB;
+           end//
+       end   
+       
+    EXE_OP4:
+       begin
+           out_op4_BUSY <= 0;
+           if (op4_out_STB && !out_op4_BUSY)
+           begin//
+                out_op4_BUSY         <= 1;
+                result               <= result_op4;
+                current_state        <= WB;
+           end//
+       end
+       
+    EXE_OP5:
+       begin
+           out_op5_BUSY <= 0;
+           if (op5_out_STB && !out_op5_BUSY)
+           begin//
+                out_op5_BUSY         <= 1;
+                result               <= result_op5;
+                current_state        <= WB;
+           end//
+       end   
+    EXE_OP1_fp32:
+       begin
+           out_op1_BUSY_fp32 <= 0;
+           if (op1_out_STB_fp32 && !out_op1_BUSY_fp32)
+           begin//
+                out_op1_BUSY_fp32         <= 1;
+                result               <= result_op1_fp32;
+                current_state        <= WB;
+           end//
+       end 
+       
+       
+      
+    
+    WB:
+       begin
+           pico_wr          <= 1;
+           pico_wait          <= 0;
+           pico_rd         <= result;
+           pico_ready <= 1;
+           current_state     <= IF;
+       end
+    endcase
+
+end
+
+
+
+if(rst)
+begin
+    // ready_reg           <= 1; //op status ready - 1
+    
+    op1_inp_STB         <= 0; //no valid input to operation1 module
+    op1_inp_STB_fp32    <= 0; //no valid input to operation1 module
+    op2_inp_STB         <= 0; //no valid input to operation2 module
+    op3_inp_STB         <= 0; //no valid input to operation3 module
+    op4_inp_STB         <= 0; //no valid input to operation4 module
+    op5_inp_STB         <= 0; //no valid input to operation5 module
+    // RegWrite            <= 0; //no writing to register file
+
+    current_state       <= IF;
+end
+end//always
+
+endmodule
+
+module operation1(
+    clk,
+    rst,
+    input_a,
+    input_b,
+    input_c,
+    input_d,
+    op1_input_STB,
+    op1_BUSY,
+    output_result,
+    op1_output_STB,
+    output_module_BUSY
+   );
+
+   input clk;
+   input rst;
+   
+   input [15:0] input_a;
+   input [15:0] input_b;
+   input [15:0] input_c;
+   input [15:0] input_d;
+   
+   input     op1_input_STB;
+   output    op1_BUSY;
+  
+   output    [15:0] output_result;
+  
+   output    op1_output_STB;
+   input     output_module_BUSY;
+   
+
+
+reg mult_input_STB1, mult_BUSY1;
+reg [15:0] result1;
+reg output_STB1, output_BUSY1;
+reg [15:0] a, b;
+wire mult_BUSY1_w, mult_input_STB1_w, output_STB1_w, output_STB2_w;
+wire [15:0] result1_w;
+wire mult_BUSY2_w, mult_input_STB2_w;
+wire [15:0] result2_w;
+// wire mult_BUSY1_w, mult_input_STB1_w;
+// wire [15:0] result1_w;
+
+multiplier_bf16 mult_inst1 (
+        .input_a(a),
+        .input_b(b),
+        .mult_input_STB(mult_input_STB1),
+        .mult_BUSY(mult_BUSY1_w),
+        .clk(clk),
+        .rst(rst),
+        .output_mult(result1_w),
+        .mult_output_STB(output_STB1_w),
+        .output_module_BUSY(output_BUSY1)
+		);
+
+reg mult_input_STB2, mult_BUSY2;
+reg [15:0] result2;
+reg output_STB2, output_BUSY2;
+reg [15:0] c, d;
+multiplier_bf16 mult_inst2 (
+        .input_a(c),
+        .input_b(d),
+        .mult_input_STB(mult_input_STB2),
+        .mult_BUSY(mult_BUSY2_w),
+        .clk(clk),
+        .rst(rst),
+        .output_mult(result2_w),
+        .mult_output_STB(output_STB2_w),
+        .output_module_BUSY(output_BUSY2)
+		);
+
+reg adder_input_STB, adder_BUSY;
+reg [15:0] output_result_reg;
+wire [15:0] output_result_reg_w;
+wire adder_BUSY_w, adder_output_STB_w;
+reg adder_output_STB, adder_output_module_BUSY;
+reg [15:0] result1_reg, result2_reg;
+
+adder_bf16 adder_inst
+        (
+        .input_a(result1_reg),
+        .input_b(result2_reg),
+		.adder_input_STB(adder_input_STB),
+		.adder_BUSY(adder_BUSY_w),
+        .clk(clk),
+        .rst(rst),
+		.output_sum(output_result_reg_w),
+        .adder_output_STB(adder_output_STB_w),
+        .output_module_BUSY(adder_output_module_BUSY)
+		);
+
+
+//reg [31:0] a,b,c,d;
+//reg mult_input_STB1, mult_input_STB2;
+reg op1_BUSY_reg, op1_output_STB_reg;
+reg [15:0] output_result_temp;
+
+assign output_result = output_result_temp; 
+assign op1_output_STB =  op1_output_STB_reg;
+assign op1_BUSY = op1_BUSY_reg;
+
+
+
+
+
+
+
+
+
+parameter  get_a_b_start_mult = 3'b000;
+parameter  deassert_mult_input_STB1 = 3'b001;
+parameter  wait_for_mult1_comp = 3'b010;
+parameter  get_c_d_start_mult = 3'b011;
+parameter  wait_for_mult2_comp = 3'b100;
+parameter  start_add = 3'b101;
+parameter  finish = 3'b110;
+parameter  wait_for_add_comp = 3'b111;
+
+ 
+
+reg [2:0] current_state;
+
+always@(posedge clk)
+begin
+ adder_output_STB = adder_output_STB_w;
+ adder_BUSY = adder_BUSY_w;
+ output_result_reg = output_result_reg_w;
+
+ result1 = result1_w;
+ result2 = result2_w;
+ mult_BUSY1 = mult_BUSY1_w;
+ mult_BUSY2 = mult_BUSY2_w;
+if(!rst)
+begin
+case(current_state)
+
+  
+get_a_b_start_mult:
+  begin
+    op1_BUSY_reg <= 0;
+    if(op1_input_STB && !op1_BUSY_reg)
+    begin
+    a<= input_a;
+    b<= input_b;
+    mult_input_STB1 <= 1'b1;
+    op1_BUSY_reg <= 1'b1;
+    //$display("debug1");
+    current_state <= deassert_mult_input_STB1;
+    end
+  end
+  
+deassert_mult_input_STB1:
+  begin
+    if(mult_input_STB1 && mult_BUSY1)
+      begin
+        //$display("debug2");
+        mult_input_STB1 <= 1'b0;
+        output_BUSY1 <= 1'b0;
+        current_state <= wait_for_mult1_comp;
+      end
+    end
+ 
+  
+wait_for_mult1_comp:
+  begin
+    if(output_STB1 && !output_BUSY1)
+      begin
+        result1_reg <= result1;
+        output_BUSY1 <= 1'b1;
+        current_state <= get_c_d_start_mult;
+      end
+  end
+
+get_c_d_start_mult:
+  begin
+    c<= input_c;
+    d<= input_d;
+    mult_input_STB2<=1'b1;
+    if(mult_input_STB2 && mult_BUSY2)
+      begin
+        mult_input_STB2 <= 1'b0;
+        output_BUSY2<= 1'b0;
+        current_state <= wait_for_mult2_comp;
+      end
+  end
+
+wait_for_mult2_comp:
+  begin
+    if(output_STB2 && !output_BUSY2)
+      begin
+        result2_reg <= result2;
+        output_BUSY2 <= 1'b1;
+        current_state <= start_add;
+      end
+  end
+
+start_add:
+begin
+    adder_input_STB <= 1'b1;
+    if(adder_input_STB && !adder_BUSY)
+      begin
+        adder_input_STB <= 1'b0;
+        adder_output_module_BUSY <= 1'b0;
+        current_state <= wait_for_add_comp;
+      end
+end
+
+wait_for_add_comp:
+    begin
+      if(adder_output_STB && !adder_output_module_BUSY)
+        begin
+            op1_output_STB_reg <= 1'b1;
+            output_result_temp <= output_result_reg;
+            adder_output_module_BUSY <= 1'b1;
+            current_state <= finish;
+        end
+    end
+
+finish:
+  begin
+    if(op1_output_STB_reg && !output_module_BUSY)
+      begin
+        op1_output_STB_reg <= 1'b0;
+        current_state <= get_a_b_start_mult;
+      end
+  end
+
+endcase
+
+end
+
+if(rst)
+begin
+op1_BUSY_reg <= 0;
+op1_output_STB_reg <= 0;
+adder_input_STB <= 0;
+mult_input_STB1 <= 0;
+mult_input_STB2 <= 0;
+current_state <= get_a_b_start_mult;
+end
+    
+end
+
+
+endmodule 
+
+module operation2(
+    clk,
+    rst,
+    input_a,
+    input_b,
+    input_c,
+    input_d,
+    op2_input_STB,
+    op2_BUSY,
+    output_result,
+    op2_output_STB,
+    output_module_BUSY
+   );
+
+   input clk;
+   input rst;
+   
+   input [15:0] input_a;
+   input [15:0] input_b;
+   input [15:0] input_c;
+   input [15:0] input_d;
+   
+   input     op2_input_STB;
+   output    op2_BUSY;
+  
+   output    [15:0] output_result;
+  
+   output    op2_output_STB;
+   input     output_module_BUSY;
+   
+
+
+reg div_input_STB1, div_BUSY1;
+wire div_BUSY1_w;
+reg [15:0] result1;
+wire [15:0] result1_w;
+reg output_STB1, output_BUSY1;
+wire output_STB1_w;
+reg [15:0] a, b;
+divider_bf16 div_inst1 (
+        .input_a(a),
+        .input_b(b),
+        .div_input_STB(div_input_STB1),
+        .div_BUSY(div_BUSY1_w),
+        .clk(clk),
+        .rst(rst),
+        .output_div(result1_w),
+        .div_output_STB(output_STB1_w),
+        .output_module_BUSY(output_BUSY1)
+		);
+
+reg div_input_STB2, div_BUSY2;
+reg [15:0] result2;
+reg output_STB2, output_BUSY2;
+wire [15:0] result2_w;
+wire output_STB2_w, div_BUSY2_W;
+
+reg [15:0] c, d;
+divider_bf16 div_inst2 (
+        .input_a(c),
+        .input_b(d),
+        .div_input_STB(div_input_STB2),
+        .div_BUSY(div_BUSY2_w),
+        .clk(clk),
+        .rst(rst),
+        .output_div(result2_w),
+        .div_output_STB(output_STB2_w),
+        .output_module_BUSY(output_BUSY2)
+		);
+
+reg adder_input_STB, adder_BUSY;
+reg [15:0] output_result_reg;
+reg adder_output_STB, adder_output_module_BUSY;
+reg [15:0] result1_reg, result2_reg;
+wire adder_BUSY_w, adder_output_STB_w;
+wire [15:0]output_result_reg_w;
+
+adder_bf16 adder_inst
+        (
+        .input_a(result1_reg),
+        .input_b(result2_reg),
+		    .adder_input_STB(adder_input_STB),
+		    .adder_BUSY(adder_BUSY_w),
+        .clk(clk),
+        .rst(rst),
+		    .output_sum(output_result_reg_w),
+        .adder_output_STB(adder_output_STB_w),
+        .output_module_BUSY(adder_output_module_BUSY)
+		);
+
+
+//reg [15:0] a,b,c,d;
+//reg mult_input_STB1, mult_input_STB2;
+reg op2_BUSY_reg, op2_output_STB_reg;
+reg [15:0] output_result_temp;
+
+assign output_result = output_result_temp; 
+assign op2_output_STB =  op2_output_STB_reg;
+assign op2_BUSY = op2_BUSY_reg;
+
+
+
+parameter  get_a_b_start_div = 3'b000;
+parameter  deassert_div_input_STB1 = 3'b001;
+parameter  wait_for_div1_comp = 3'b010;
+parameter  get_c_d_start_div = 3'b011;
+parameter  wait_for_div2_comp = 3'b100;
+parameter  start_add = 3'b101;
+parameter  finish = 3'b110;
+parameter  wait_for_add_comp = 3'b111;
+ 
+
+reg [2:0] current_state;
+
+always@(posedge clk)
+begin
+div_BUSY1 <= div_BUSY1_w;
+output_STB1 <= output_STB1_w;
+result1 <= result1_w;
+
+  result2 <= result2_w ;
+output_STB2 <= output_STB2_w;
+div_BUSY2 <= div_BUSY2_w  ;
+
+adder_output_STB <=  adder_output_STB_w;
+adder_BUSY <= adder_BUSY_w;
+
+output_result_reg <= output_result_reg_w;  
+
+
+if(!rst)
+begin
+  
+case(current_state)
+
+  
+get_a_b_start_div:
+  begin
+    op2_BUSY_reg <= 0;
+    if(op2_input_STB && !op2_BUSY_reg)
+    begin
+    a<= input_a;
+    b<= input_b;
+    div_input_STB1 <= 1'b1;
+    op2_BUSY_reg <= 1'b1;
+    current_state <= deassert_div_input_STB1;
+    end
+  end
+
+deassert_div_input_STB1:
+  begin
+    if(div_input_STB1 && div_BUSY1)
+      begin
+        div_input_STB1 <= 1'b0;
+        output_BUSY1 <= 1'b0;
+        current_state <= wait_for_div1_comp;
+      end
+
+  end
+  
+wait_for_div1_comp:
+  begin
+    if(output_STB1 && !output_BUSY1)
+      begin
+        result1_reg <= result1;
+        output_BUSY1 <= 1'b1;
+        current_state <= get_c_d_start_div;
+      end
+  end
+
+get_c_d_start_div:
+  begin
+    c<= input_c;
+    d<= input_d;
+    div_input_STB2<=1'b1;
+    if(div_input_STB2 && div_BUSY2)
+      begin
+        div_input_STB2 <= 1'b0;
+        output_BUSY2<= 1'b0;
+        current_state <= wait_for_div2_comp;
+      end
+  end
+
+wait_for_div2_comp:
+  begin
+    if(output_STB2 && !output_BUSY2)
+      begin
+        result2_reg <= result2;
+        output_BUSY2 <= 1'b1;
+        current_state <= start_add;
+      end
+  end
+
+start_add:
+begin
+    adder_input_STB <= 1'b1;
+    if(adder_input_STB && !adder_BUSY)
+      begin
+        adder_input_STB <= 1'b0;
+        adder_output_module_BUSY <= 1'b0;
+        current_state <= wait_for_add_comp;
+      end
+end
+
+wait_for_add_comp:
+    begin
+      if(adder_output_STB && !adder_output_module_BUSY)
+        begin
+            op2_output_STB_reg <= 1'b1;
+            output_result_temp <= output_result_reg;
+            adder_output_module_BUSY <= 1'b1;
+            current_state <= finish;
+        end
+    end
+
+finish:
+  begin
+    if(op2_output_STB_reg && !output_module_BUSY)
+      begin
+        op2_output_STB_reg <= 1'b0;
+        current_state <= get_a_b_start_div;
+      end
+  end
+
+endcase
+
+end
+
+if(rst)
+begin
+op2_BUSY_reg <= 0;
+op2_output_STB_reg <= 0;
+adder_input_STB <= 0;
+div_input_STB1 <= 0;
+div_input_STB2 <= 0;
+current_state <= get_a_b_start_div;
+end
+
+end
+
+endmodule 
+
+// Code your design here
+module operation3(
+    clk,
+    rst,
+    input_tp,
+    op3_input_STB,
+    op3_BUSY,
+    output_x,
+    op3_output_STB,
+    output_module_BUSY
+);
+
+input clk;
+input rst;
+input input_tp;
+
+input op3_input_STB;
+output op3_BUSY;
+output  op3_output_STB;
+input output_module_BUSY;
+output[15:0] output_x;
+
+reg a;
+reg op3_BUSY_reg, op3_output_STB_reg;
+reg[15:0] output_x_temp;
+assign output_x = output_x_temp; 
+assign op3_output_STB =  op3_output_STB_reg;
+assign op3_BUSY = op3_BUSY_reg;
+
+
+
+parameter    state_0 = 3'b000;
+parameter   state_1 = 3'b001;
+parameter   state_2 = 3'b010;
+parameter    state_3 = 3'b011;
+parameter    finish = 3'b100;
+
+
+
+
+reg [2:0] current_state;
+
+always@(posedge clk)
+begin
+if(!rst)
+begin
+    case(current_state)
+
+    state_0:
+    begin
+        op3_BUSY_reg<=0;
+        if(op3_input_STB && !op3_BUSY_reg)
+        begin
+            a <= input_tp;
+            op3_BUSY_reg<=1'b1;
+            current_state <= state_1;
+        end
+    end
+
+    state_1:
+    begin
+        if(a)
+        begin
+        current_state <= state_2;
+        end        
+        else
+        begin
+        current_state <=state_3;
+        end
+    end
+    
+    state_2:
+    begin
+        op3_output_STB_reg <= 1'b1;
+        output_x_temp <= 32'b0011111110000000;
+        current_state <= finish;
+    end
+
+    state_3:
+    begin
+        op3_output_STB_reg <=1'b1;
+        output_x_temp <= 32'b0000000000000000;
+        current_state <=finish;
+    end
+
+    finish:
+    begin
+        if(op3_output_STB_reg && !output_module_BUSY)
+        begin
+            op3_output_STB_reg <= 1'b0;
+            current_state <= state_0;
+        end
+    end
+endcase
+
+end
+
+if(rst)
+begin
+op3_BUSY_reg <= 0;
+op3_output_STB_reg <= 0;
+current_state <= state_0;
+end
+    
+end
+
+endmodule
+module operation4(
+    clk,
+    rst,
+    input_a,
+    input_b,
+    input_c,
+    input_d,
+    op4_input_STB,
+    op4_BUSY,
+    output_result,
+    op4_output_STB,
+    output_module_BUSY
+   );
+
+   input clk;
+   input rst;
+   
+   input [15:0] input_a;
+   input [15:0] input_b;
+   input [15:0] input_c;
+   input [15:0] input_d;
+   
+   input     op4_input_STB;
+   output    op4_BUSY;
+  
+   output    [15:0] output_result;
+  
+   output    op4_output_STB;
+   input     output_module_BUSY;
+   
+
+
+reg adder_input_STB1, adder_BUSY1;
+reg [15:0] result1;
+reg output_STB1, output_BUSY1;
+reg [15:0] a, b;
+wire adder_BUSY1_w, output_STB1_w;
+wire [15:0]result1_w;
+wire adder_BUSY2_w, output_STB2_w;
+wire [15:0]result2_w;
+wire adder_BUSY_w, adder_output_STB_w;
+wire [15:0]output_result_reg_w;
+adder_bf16 adder_inst1
+        (
+        .input_a(a),
+        .input_b(b),
+		.adder_input_STB(adder_input_STB1),
+		.adder_BUSY(adder_BUSY1_w),
+        .clk(clk),
+        .rst(rst),
+		.output_sum(result1_w),
+        .adder_output_STB(output_STB1_w),
+        .output_module_BUSY(output_BUSY1)
+		);
+
+reg adder_input_STB2, adder_BUSY2;
+reg [15:0] result2;
+reg output_STB2, output_BUSY2;
+reg [15:0] c, d;
+adder_bf16 adder_inst2
+        (
+        .input_a(c),
+        .input_b(d),
+		.adder_input_STB(adder_input_STB2),
+		.adder_BUSY(adder_BUSY2_w),
+        .clk(clk),
+        .rst(rst),
+		.output_sum(result2_w),
+        .adder_output_STB(output_STB2_w),
+        .output_module_BUSY(output_BUSY2)
+		);
+
+reg adder_input_STB, adder_BUSY;
+reg [15:0] output_result_reg;
+reg adder_output_STB, adder_output_module_BUSY;
+reg [15:0] result1_reg, result2_reg;
+
+adder_bf16 adder_inst3
+        (
+        .input_a(result1_reg),
+        .input_b(result2_reg),
+		.adder_input_STB(adder_input_STB),
+		.adder_BUSY(adder_BUSY_w),
+        .clk(clk),
+        .rst(rst),
+		.output_sum(output_result_reg_w),
+        .adder_output_STB(adder_output_STB_w),
+        .output_module_BUSY(adder_output_module_BUSY)
+		);
+
+
+//reg [15:0] a,b,c,d;
+//reg mult_input_STB1, mult_input_STB2;
+reg op4_BUSY_reg, op4_output_STB_reg;
+reg [15:0] output_result_temp;
+
+assign output_result = output_result_temp; 
+assign op4_output_STB =  op4_output_STB_reg;
+assign op4_BUSY = op4_BUSY_reg;
+
+
+parameter  get_a_b_start_add = 3'b000;
+parameter  deassert_add_input_STB1 = 3'b001;
+parameter  wait_for_add1_comp = 3'b010;
+parameter  get_c_d_start_add = 3'b011;
+parameter  wait_for_add2_comp = 3'b100;
+parameter  start_add = 3'b101;
+parameter  finish = 3'b110;
+parameter  wait_for_add3_comp = 3'b111;
+
+ 
+
+reg [2:0] current_state;
+
+always@(posedge clk)
+begin
+adder_BUSY1 <=   adder_BUSY1_w;
+ adder_output_STB <= output_STB1_w;
+result1_reg <=  result1_w;
+adder_BUSY2 <=   adder_BUSY2_w;
+output_STB2 <=  output_STB2_w;
+result2_reg <=   result2_w;
+adder_BUSY <=  adder_BUSY_w;
+adder_output_STB <= adder_output_STB_w; 
+output_result_reg  <=  output_result_reg_w;
+if(!rst)
+begin
+case(current_state)
+
+  
+get_a_b_start_add:
+  begin
+    op4_BUSY_reg <= 0;
+    if(op4_input_STB && !op4_BUSY_reg)
+    begin
+    a<= input_a;
+    b<= input_b;
+    adder_input_STB1 <= 1'b1;
+    op4_BUSY_reg <= 1'b1;
+    //$display("debug1");
+    current_state <= deassert_add_input_STB1;
+    end
+  end
+  
+deassert_add_input_STB1:
+  begin
+    if(adder_input_STB1 && adder_BUSY1)
+      begin
+        //$display("debug2");
+        adder_input_STB1 <= 1'b0;
+        output_BUSY1 <= 1'b0;
+        current_state <= wait_for_add1_comp;
+      end
+    end
+ 
+  
+wait_for_add1_comp:
+  begin
+    if(output_STB1 && !output_BUSY1)
+      begin
+        result1_reg <= result1;
+        output_BUSY1 <= 1'b1;
+        current_state <= get_c_d_start_add;
+      end
+  end
+
+get_c_d_start_add:
+  begin
+    c<= input_c;
+    d<= input_d;
+    adder_input_STB2<=1'b1;
+    if(adder_input_STB2 && adder_BUSY2)
+      begin
+        adder_input_STB2 <= 1'b0;
+        output_BUSY2<= 1'b0;
+        current_state <= wait_for_add2_comp;
+      end
+  end
+
+wait_for_add2_comp:
+  begin
+    if(output_STB2 && !output_BUSY2)
+      begin
+        result2_reg <= result2;
+        output_BUSY2 <= 1'b1;
+        current_state <= start_add;
+      end
+  end
+
+start_add:
+begin
+    adder_input_STB <= 1'b1;
+    if(adder_input_STB && !adder_BUSY)
+      begin
+        adder_input_STB <= 1'b0;
+        adder_output_module_BUSY <= 1'b0;
+        current_state <= wait_for_add3_comp;
+      end
+end
+
+wait_for_add3_comp:
+    begin
+      if(adder_output_STB && !adder_output_module_BUSY)
+        begin
+            op4_output_STB_reg <= 1'b1;
+            output_result_temp <= output_result_reg;
+            adder_output_module_BUSY <= 1'b1;
+            current_state <= finish;
+        end
+    end
+
+finish:
+  begin
+    if(op4_output_STB_reg && !output_module_BUSY)
+      begin
+        op4_output_STB_reg <= 1'b0;
+        current_state <= get_a_b_start_add;
+      end
+  end
+
+endcase
+end
+
+if(rst)
+begin
+op4_BUSY_reg <= 0;
+op4_output_STB_reg <= 0;
+adder_input_STB <= 0;
+adder_input_STB1 <= 0;
+adder_input_STB2 <= 0;
+current_state <= get_a_b_start_add;
+end
+    
+end
+
+
+endmodule
+
+module operation5(
+    clk,
+    rst,
+    input_a,
+    input_b,
+    input_c,
+    input_d,
+    op5_input_STB,
+    op5_BUSY,
+    output_result,
+    op5_output_STB,
+    output_module_BUSY
+   );
+
+   input clk;
+   input rst;
+   
+   input [15:0] input_a;
+   input [15:0] input_b;
+   input [15:0] input_c;
+   input [15:0] input_d;
+   
+   input     op5_input_STB;
+   output    op5_BUSY;
+  
+   output    [15:0] output_result;
+  
+   output    op5_output_STB;
+   input     output_module_BUSY;
+   
+
+
+reg mult_input_STB1, mult_BUSY1;
+reg [15:0] result1;
+reg output_STB1, output_BUSY1;
+reg [15:0] a, b;
+wire mult_BUSY1_w, output_STB1_w;
+wire [15:0]result1_w;
+
+multiplier_bf16 mult_inst1 (
+        .input_a(a),
+        .input_b(b),
+        .mult_input_STB(mult_input_STB1),
+        .mult_BUSY(mult_BUSY1_w),
+        .clk(clk),
+        .rst(rst),
+        .output_mult(result1_w),
+        .mult_output_STB(output_STB1_w),
+        .output_module_BUSY(output_BUSY1)
+		);
+
+reg mult_input_STB2, mult_BUSY2;
+reg [15:0] result2;
+reg output_STB2, output_BUSY2;
+reg [15:0] c, d;
+wire mult_BUSY2_w, output_STB2_w;
+wire [15:0]result2_w;
+multiplier_bf16 mult_inst2 (
+        .input_a(c),
+        .input_b(d),
+        .mult_input_STB(mult_input_STB2),
+        .mult_BUSY(mult_BUSY2_w),
+        .clk(clk),
+        .rst(rst),
+        .output_mult(result2_w),
+        .mult_output_STB(output_STB2_w),
+        .output_module_BUSY(output_BUSY2)
+		);
+
+reg mult_input_STB, mult_BUSY;
+reg [15:0] output_result_reg;
+reg mult_output_STB, mult_output_module_BUSY;
+reg [15:0] result1_reg, result2_reg;
+wire mult_BUSY_w, mult_output_STB_w;
+wire [15:0]output_result_reg_w;
+
+multiplier_bf16 mult_inst3
+        (
+        .input_a(result1_reg),
+        .input_b(result2_reg),
+		.mult_input_STB(mult_input_STB),
+		.mult_BUSY(mult_BUSY_w),
+        .clk(clk),
+        .rst(rst),
+		.output_mult(output_result_reg_w),
+        .mult_output_STB(mult_output_STB_w),
+        .output_module_BUSY(mult_output_module_BUSY)
+		);
+
+
+//reg [15:0] a,b,c,d;
+//reg mult_input_STB1, mult_input_STB2;
+reg op5_BUSY_reg, op5_output_STB_reg;
+reg [15:0] output_result_temp;
+
+assign output_result = output_result_temp; 
+assign op5_output_STB =  op5_output_STB_reg;
+assign op5_BUSY = op5_BUSY_reg;
+
+
+parameter  get_a_b_start_mult = 3'b000;
+parameter  deassert_mult_input_STB1 = 3'b001;
+parameter  wait_for_mult1_comp = 3'b010;
+parameter  get_c_d_start_mult = 3'b011;
+parameter  wait_for_mult2_comp = 3'b100;
+parameter  start_mult = 3'b101;
+parameter  finish = 3'b110;
+parameter  wait_for_mult3_comp = 3'b111;
+
+ 
+
+reg [2:0] current_state;
+
+always@(posedge clk)
+begin
+mult_BUSY1 <=   mult_BUSY1_w;
+ mult_output_STB <= mult_output_STB_w;
+result1_reg <=  result1_w;
+mult_BUSY2 <=   mult_BUSY2_w;
+output_STB2 <=  output_STB2_w;
+result2_reg <=   result2_w;
+mult_BUSY <=  mult_BUSY_w;
+mult_output_STB <= mult_output_STB_w; 
+output_result_reg  <=  output_result_reg_w;
+if(!rst)
+begin
+case(current_state)
+
+  
+get_a_b_start_mult:
+  begin
+    op5_BUSY_reg <= 0;
+    if(op5_input_STB && !op5_BUSY_reg)
+    begin
+    a<= input_a;
+    b<= input_b;
+    mult_input_STB1 <= 1'b1;
+    op5_BUSY_reg <= 1'b1;
+    //$display("debug1");
+    current_state <= deassert_mult_input_STB1;
+    end
+  end
+  
+deassert_mult_input_STB1:
+  begin
+    if(mult_input_STB1 && mult_BUSY1)
+      begin
+        //$display("debug2");
+        mult_input_STB1 <= 1'b0;
+        output_BUSY1 <= 1'b0;
+        current_state <= wait_for_mult1_comp;
+      end
+    end
+ 
+  
+wait_for_mult1_comp:
+  begin
+    if(output_STB1 && !output_BUSY1)
+      begin
+        result1_reg <= result1;
+        output_BUSY1 <= 1'b1;
+        current_state <= get_c_d_start_mult;
+      end
+  end
+
+get_c_d_start_mult:
+  begin
+    c<= input_c;
+    d<= input_d;
+    mult_input_STB2<=1'b1;
+    if(mult_input_STB2 && mult_BUSY2)
+      begin
+        mult_input_STB2 <= 1'b0;
+        output_BUSY2<= 1'b0;
+        current_state <= wait_for_mult2_comp;
+      end
+  end
+
+wait_for_mult2_comp:
+  begin
+    if(output_STB2 && !output_BUSY2)
+      begin
+        result2_reg <= result2;
+        output_BUSY2 <= 1'b1;
+        current_state <= start_mult;
+      end
+  end
+
+start_mult:
+begin
+    mult_input_STB <= 1'b1;
+    if(mult_input_STB && !mult_BUSY)
+      begin
+        mult_input_STB <= 1'b0;
+        mult_output_module_BUSY <= 1'b0;
+        current_state <= wait_for_mult3_comp;
+      end
+end
+
+wait_for_mult3_comp:
+    begin
+      if(mult_output_STB && !mult_output_module_BUSY)
+        begin
+            op5_output_STB_reg <= 1'b1;
+            output_result_temp <= output_result_reg;
+            mult_output_module_BUSY <= 1'b1;
+            current_state <= finish;
+        end
+    end
+
+finish:
+  begin
+    if(op5_output_STB_reg && !output_module_BUSY)
+      begin
+        op5_output_STB_reg <= 1'b0;
+        current_state <= get_a_b_start_mult;
+      end
+  end
+
+endcase
+end
+
+if(rst)
+begin
+op5_BUSY_reg <= 0;
+op5_output_STB_reg <= 0;
+mult_input_STB <= 0;
+mult_input_STB1 <= 0;
+mult_input_STB2 <= 0;
+current_state <= get_a_b_start_mult;
+end
+    
+end
+
+
+endmodule 
+module multiplier_bf16(
+        input_a,
+        input_b,
+        mult_input_STB,
+        mult_BUSY,
+        clk,
+        rst,
+        output_mult,
+        mult_output_STB,
+        output_module_BUSY
+		);
+
+  input     clk;
+  input     rst;
+
+  input     [15:0] input_a;
+  input     [15:0] input_b;
+  
+  input     mult_input_STB;
+  output    mult_BUSY;
+
+  output    [15:0] output_mult;
+  output    mult_output_STB;
+  input     output_module_BUSY;
+
+  //Intermediate registers
+  reg       mult_output_STB_reg;
+  reg       [15:0] output_mult_reg;
+  reg       mult_BUSY_reg;
+
+  reg       [3:0] mult_state;
+  parameter get_a_and_b   = 4'd0,
+            unpack        = 4'd1,
+            special_cases = 4'd2,
+            normalise_a   = 4'd3,
+            normalise_b   = 4'd4,
+            multiply_0    = 4'd5,
+            multiply_1    = 4'd6,
+            normalise_1   = 4'd7,
+            normalise_2   = 4'd8,
+            round         = 4'd9,
+            pack          = 4'd10,
+            put_z         = 4'd11;
+
+  reg       [15:0] a, b, z;
+  reg       [7:0] a_m, b_m, z_m;
+  reg       [9:0] a_e, b_e, z_e;
+  reg       a_s, b_s, z_s;
+  reg       guard, round_bit, sticky;
+  reg       [49:0] product;
+
+  always @(posedge clk)
+  begin
+
+    case(mult_state)
+
+	  
+	  get_a_and_b: //Initial state wait for valid inputs and make BUSY = 0 because it has finished previous operation 
+      begin
+        mult_BUSY_reg <= 0;
+        if (!(mult_BUSY_reg) && mult_input_STB) begin  //Once it gets valid input take that input and start processing.
+          a <= {input_a};
+		  b <= {input_b};
+          mult_BUSY_reg <= 1; //Turn the BUSY signal on, BUSY = 1 because now it will be busy processing latched inputs and can no more take inputs even if it is valid. 
+          mult_state <= unpack;
+        end
+      end
+
+      unpack:
+      begin
+        a_m <= a[6 : 0];
+        b_m <= b[6 : 0];
+        a_e <= a[14 : 7] - 127;
+        b_e <= b[14 : 7] - 127;
+        a_s <= a[15];
+        b_s <= b[15];
+        mult_state <= special_cases;
+      end
+
+      special_cases:
+      begin
+        //if a is NaN or b is NaN return NaN 
+        if ((a_e == 128 && a_m != 0) || (b_e == 128 && b_m != 0)) begin
+          z[15] <= 1;
+          z[14:7] <= 255;
+          z[6] <= 1;
+          z[5:0] <= 0;
+          mult_state <= put_z;
+        //if a is inf return inf
+        end else if (a_e == 128) begin
+          z[15] <= a_s ^ b_s;
+          z[14:7] <= 255;
+          z[6:0] <= 0;
+          //if b is zero return NaN
+          if (($signed(b_e) == -127) && (b_m == 0)) begin
+            z[15] <= 1;
+            z[14:7] <= 255;
+            z[6] <= 1;
+            z[5:0] <= 0;
+          end
+          mult_state <= put_z;
+        //if b is inf return inf
+        end else if (b_e == 128) begin
+          z[15] <= a_s ^ b_s;
+          z[14:7] <= 255;
+          z[6:0] <= 0;
+          //if a is zero return NaN
+          if (($signed(a_e) == -127) && (a_m == 0)) begin
+            z[15] <= 1;
+            z[14:7] <= 255;
+            z[6] <= 1;
+            z[5:0] <= 0;
+          end
+          mult_state <= put_z;
+        //if a is zero return zero
+        end else if (($signed(a_e) == -127) && (a_m == 0)) begin
+          z[15] <= a_s ^ b_s;
+          z[14:7] <= 0;
+          z[6:0] <= 0;
+          mult_state <= put_z;
+        //if b is zero return zero
+        end else if (($signed(b_e) == -127) && (b_m == 0)) begin
+          z[15] <= a_s ^ b_s;
+          z[14:7] <= 0;
+          z[6:0] <= 0;
+          mult_state <= put_z;
+        end else begin
+          //Denormalised Number
+          if ($signed(a_e) == -127) begin
+            a_e <= -126;
+          end else begin
+            a_m[7] <= 1;
+          end
+          //Denormalised Number
+          if ($signed(b_e) == -127) begin
+            b_e <= -126;
+          end else begin
+            b_m[7] <= 1;
+          end
+          mult_state <= normalise_a;
+        end
+      end
+
+      normalise_a:
+      begin
+        if (a_m[7]) begin
+          mult_state <= normalise_b;
+        end else begin
+          a_m <= a_m << 1;
+          a_e <= a_e - 1;
+        end
+      end
+
+      normalise_b:
+      begin
+        if (b_m[7]) begin
+          mult_state <= multiply_0;
+        end else begin
+          b_m <= b_m << 1;
+          b_e <= b_e - 1;
+        end
+      end
+
+      multiply_0:
+      begin
+        z_s <= a_s ^ b_s;
+        z_e <= a_e + b_e + 1;
+        product <= a_m * b_m * 4;
+        mult_state <= multiply_1;
+      end
+
+      multiply_1:
+      begin
+        z_m <= product[49:26];
+        guard <= product[25];
+        round_bit <= product[24];
+        sticky <= (product[23:0] != 0);
+        mult_state <= normalise_1;
+      end
+
+      normalise_1:
+      begin
+        if (z_m[7] == 0) begin
+          z_e <= z_e - 1;
+          z_m <= z_m << 1;
+          z_m[0] <= guard;
+          guard <= round_bit;
+          round_bit <= 0;
+        end else begin
+          mult_state <= normalise_2;
+        end
+      end
+
+      normalise_2:
+      begin
+        if ($signed(z_e) < -126) begin
+          z_e <= z_e + 1;
+          z_m <= z_m >> 1;
+          guard <= z_m[0];
+          round_bit <= guard;
+          sticky <= sticky | round_bit;
+        end else begin
+          mult_state <= round;
+        end
+      end
+
+      round:
+      begin
+        if (guard && (round_bit | sticky | z_m[0])) begin
+          z_m <= z_m + 1;
+          if (z_m == 8'hff) begin
+            z_e <=z_e + 1;
+          end
+        end
+        mult_state <= pack;
+      end
+
+      pack:
+      begin
+        z[6 : 0] <= z_m[6:0];
+        z[14 : 7] <= z_e[7:0] + 127;
+        z[15] <= z_s;
+        if ($signed(z_e) == -126 && z_m[7] == 0) begin
+          z[14 : 7] <= 0;
+        end
+        //if overflow occurs, return inf
+        if ($signed(z_e) > 127) begin
+          z[6 : 0] <= 0;
+          z[14 : 7] <= 255;
+          z[15] <= z_s;
+        end
+        mult_state <= put_z;
+      end
+	  
+	  put_z: //Final state valid output is ready , make the output STB/VALID = 1, put valid output.
+      begin
+        mult_output_STB_reg <= 1;
+        output_mult_reg <= z;
+        if (mult_output_STB_reg && !(output_module_BUSY)) begin //Once output module is no more BUSY it lowers it's busy signal and output is then taken by next module.
+          mult_output_STB_reg <= 0; //Output is no more valid.
+          mult_state <= get_a_and_b; //Go back to initial state.
+        end
+      end
+
+    endcase
+
+	
+	 if (rst == 1) begin //At Active high reset, module is no more BUSY, go to initial state and wait for valid inputs. Input is don't care and output is don't care , so output VALID/STB = 0.
+      mult_state <= get_a_and_b;
+      mult_BUSY_reg <= 0; 
+      mult_output_STB_reg <= 0;
+    end
+
+  end
+  
+  
+   `ifdef SYNTHESIS_OFF //Purely combinational logic for debugging purpose, based on hexadecimal encoded states it will show named states in waveform 
+   //see this register "statename" in ASCII in dump
+  reg [8*13:0] mult_statename;//Highest 13 Number of ASCII letters each 8 bits.
+  always@* begin
+    case (1'b1)
+      (mult_state === get_a_and_b)  : mult_statename = "GET_A_AND_B";
+      (mult_state === unpack)       : mult_statename = "UNPACK";
+      (mult_state === special_cases): mult_statename = "SPECIAL_CASES";//13 ASCII letters
+      (mult_state === normalise_a)  : mult_statename = "NORMALISE_A";
+      (mult_state === normalise_b)  : mult_statename = "NORMALISE_B";
+      (mult_state === multiply_0)   : mult_statename = "MULTIPLY_0";
+      (mult_state === multiply_1)   : mult_statename = "MULTIPLY_1";
+      (mult_state === normalise_1)  : mult_statename = "NORMALIZE_1";
+      (mult_state === normalise_2)  : mult_statename = "NORMALIZE_2";
+      (mult_state === round)        : mult_statename = "ROUND";
+      (mult_state === pack)         : mult_statename = "PACK";
+      (mult_state === put_z)        : mult_statename = "PUT_Z";
+    endcase
+  end//always
+  `endif
+  
+  
+
+  //Continuous assignments
+  
+  assign mult_BUSY = mult_BUSY_reg;
+  assign mult_output_STB = mult_output_STB_reg;
+  assign output_mult = output_mult_reg[15:0];
+
+endmodule 
+
+
+module multiplier_fp32(
+        input_a,
+        input_b,
+        mult_input_STB,
+        mult_BUSY,
+        clk,
+        rst,
+        output_mult,
+        mult_output_STB,
+        output_module_BUSY
+		);
+
+  input     clk;
+  input     rst;
+
+  input     [31:0] input_a;
+  input     [31:0] input_b;
+  
+  input     mult_input_STB;
+  output    mult_BUSY;
+
+  output    [31:0] output_mult;
+  output    mult_output_STB;
+  input     output_module_BUSY;
+
+  //Intermediate registers
+  reg       mult_output_STB_reg;
+  reg       [31:0] output_mult_reg;
+  reg       mult_BUSY_reg;
+
+  reg       [3:0] mult_state;
+  parameter get_a_and_b   = 4'd0,
+            unpack        = 4'd1,
+            special_cases = 4'd2,
+            normalise_a   = 4'd3,
+            normalise_b   = 4'd4,
+            multiply_0    = 4'd5,
+            multiply_1    = 4'd6,
+            normalise_1   = 4'd7,
+            normalise_2   = 4'd8,
+            round         = 4'd9,
+            pack          = 4'd10,
+            put_z         = 4'd11;
+
+  reg       [31:0] a, b, z;
+  reg       [23:0] a_m, b_m, z_m;
+  reg       [9:0] a_e, b_e, z_e;
+  reg       a_s, b_s, z_s;
+  reg       guard, round_bit, sticky;
+  reg       [49:0] product;
+
+  always @(posedge clk)
+  begin
+
+    case(mult_state)
+
+	  
+	  get_a_and_b: //Initial state wait for valid inputs and make BUSY = 0 because it has finished previous operation 
+      begin
+        mult_BUSY_reg <= 0;
+        if (!(mult_BUSY_reg) && mult_input_STB) begin  //Once it gets valid input take that input and start processing.
+          a <= input_a;
+		  b <= input_b;
+          mult_BUSY_reg <= 1; //Turn the BUSY signal on, BUSY = 1 because now it will be busy processing latched inputs and can no more take inputs even if it is valid. 
+          mult_state <= unpack;
+        end
+      end
+
+      unpack:
+      begin
+        a_m <= a[22 : 0];
+        b_m <= b[22 : 0];
+        a_e <= a[30 : 23] - 127;
+        b_e <= b[30 : 23] - 127;
+        a_s <= a[31];
+        b_s <= b[31];
+        mult_state <= special_cases;
+      end
+
+      special_cases:
+      begin
+        //if a is NaN or b is NaN return NaN 
+        if ((a_e == 128 && a_m != 0) || (b_e == 128 && b_m != 0)) begin
+          z[31] <= 1;
+          z[30:23] <= 255;
+          z[22] <= 1;
+          z[21:0] <= 0;
+          mult_state <= put_z;
+        //if a is inf return inf
+        end else if (a_e == 128) begin
+          z[31] <= a_s ^ b_s;
+          z[30:23] <= 255;
+          z[22:0] <= 0;
+          //if b is zero return NaN
+          if (($signed(b_e) == -127) && (b_m == 0)) begin
+            z[31] <= 1;
+            z[30:23] <= 255;
+            z[22] <= 1;
+            z[21:0] <= 0;
+          end
+          mult_state <= put_z;
+        //if b is inf return inf
+        end else if (b_e == 128) begin
+          z[31] <= a_s ^ b_s;
+          z[30:23] <= 255;
+          z[22:0] <= 0;
+          //if a is zero return NaN
+          if (($signed(a_e) == -127) && (a_m == 0)) begin
+            z[31] <= 1;
+            z[30:23] <= 255;
+            z[22] <= 1;
+            z[21:0] <= 0;
+          end
+          mult_state <= put_z;
+        //if a is zero return zero
+        end else if (($signed(a_e) == -127) && (a_m == 0)) begin
+          z[31] <= a_s ^ b_s;
+          z[30:23] <= 0;
+          z[22:0] <= 0;
+          mult_state <= put_z;
+        //if b is zero return zero
+        end else if (($signed(b_e) == -127) && (b_m == 0)) begin
+          z[31] <= a_s ^ b_s;
+          z[30:23] <= 0;
+          z[22:0] <= 0;
+          mult_state <= put_z;
+        end else begin
+          //Denormalised Number
+          if ($signed(a_e) == -127) begin
+            a_e <= -126;
+          end else begin
+            a_m[23] <= 1;
+          end
+          //Denormalised Number
+          if ($signed(b_e) == -127) begin
+            b_e <= -126;
+          end else begin
+            b_m[23] <= 1;
+          end
+          mult_state <= normalise_a;
+        end
+      end
+
+      normalise_a:
+      begin
+        if (a_m[23]) begin
+          mult_state <= normalise_b;
+        end else begin
+          a_m <= a_m << 1;
+          a_e <= a_e - 1;
+        end
+      end
+
+      normalise_b:
+      begin
+        if (b_m[23]) begin
+          mult_state <= multiply_0;
+        end else begin
+          b_m <= b_m << 1;
+          b_e <= b_e - 1;
+        end
+      end
+
+      multiply_0:
+      begin
+        z_s <= a_s ^ b_s;
+        z_e <= a_e + b_e + 1;
+        product <= a_m * b_m * 4;
+        mult_state <= multiply_1;
+      end
+
+      multiply_1:
+      begin
+        z_m <= product[49:26];
+        guard <= product[25];
+        round_bit <= product[24];
+        sticky <= (product[23:0] != 0);
+        mult_state <= normalise_1;
+      end
+
+      normalise_1:
+      begin
+        if (z_m[23] == 0) begin
+          z_e <= z_e - 1;
+          z_m <= z_m << 1;
+          z_m[0] <= guard;
+          guard <= round_bit;
+          round_bit <= 0;
+        end else begin
+          mult_state <= normalise_2;
+        end
+      end
+
+      normalise_2:
+      begin
+        if ($signed(z_e) < -126) begin
+          z_e <= z_e + 1;
+          z_m <= z_m >> 1;
+          guard <= z_m[0];
+          round_bit <= guard;
+          sticky <= sticky | round_bit;
+        end else begin
+          mult_state <= round;
+        end
+      end
+
+      round:
+      begin
+        if (guard && (round_bit | sticky | z_m[0])) begin
+          z_m <= z_m + 1;
+          if (z_m == 24'hffffff) begin
+            z_e <=z_e + 1;
+          end
+        end
+        mult_state <= pack;
+      end
+
+      pack:
+      begin
+        z[22 : 0] <= z_m[22:0];
+        z[30 : 23] <= z_e[7:0] + 127;
+        z[31] <= z_s;
+        if ($signed(z_e) == -126 && z_m[23] == 0) begin
+          z[30 : 23] <= 0;
+        end
+        //if overflow occurs, return inf
+        if ($signed(z_e) > 127) begin
+          z[22 : 0] <= 0;
+          z[30 : 23] <= 255;
+          z[31] <= z_s;
+        end
+        mult_state <= put_z;
+      end
+	  
+	  put_z: //Final state valid output is ready , make the output STB/VALID = 1, put valid output.
+      begin
+        mult_output_STB_reg <= 1;
+        output_mult_reg <= z;
+        if (mult_output_STB_reg && !(output_module_BUSY)) begin //Once output module is no more BUSY it lowers it's busy signal and output is then taken by next module.
+          mult_output_STB_reg <= 0; //Output is no more valid.
+          mult_state <= get_a_and_b; //Go back to initial state.
+        end
+      end
+
+    endcase
+
+	
+	 if (rst == 1) begin //At Active high reset, module is no more BUSY, go to initial state and wait for valid inputs. Input is don't care and output is don't care , so output VALID/STB = 0.
+      mult_state <= get_a_and_b;
+      mult_BUSY_reg <= 0; 
+      mult_output_STB_reg <= 0;
+    end
+
+  end
+  
+  
+   `ifdef SYNTHESIS_OFF //Purely combinational logic for debugging purpose, based on hexadecimal encoded states it will show named states in waveform 
+   //see this register "statename" in ASCII in dump
+  reg [8*13:0] mult_statename;//Highest 13 Number of ASCII letters each 8 bits.
+  always@* begin
+    case (1'b1)
+      (mult_state === get_a_and_b)  : mult_statename = "GET_A_AND_B";
+      (mult_state === unpack)       : mult_statename = "UNPACK";
+      (mult_state === special_cases): mult_statename = "SPECIAL_CASES";//13 ASCII letters
+      (mult_state === normalise_a)  : mult_statename = "NORMALISE_A";
+      (mult_state === normalise_b)  : mult_statename = "NORMALISE_B";
+      (mult_state === multiply_0)   : mult_statename = "MULTIPLY_0";
+      (mult_state === multiply_1)   : mult_statename = "MULTIPLY_1";
+      (mult_state === normalise_1)  : mult_statename = "NORMALIZE_1";
+      (mult_state === normalise_2)  : mult_statename = "NORMALIZE_2";
+      (mult_state === round)        : mult_statename = "ROUND";
+      (mult_state === pack)         : mult_statename = "PACK";
+      (mult_state === put_z)        : mult_statename = "PUT_Z";
+    endcase
+  end//always
+  `endif
+  
+  
+
+  //Continuous assignments
+  
+  assign mult_BUSY = mult_BUSY_reg;
+  assign mult_output_STB = mult_output_STB_reg;
+  assign output_mult = output_mult_reg;
+
+endmodule 
+module operation1_fp32(
+    clk,
+    rst,
+    input_a,
+    input_b,
+    input_c,
+    input_d,
+    op1_input_STB,
+    op1_BUSY,
+    output_result,
+    op1_output_STB,
+    output_module_BUSY
+   );
+
+   input clk;
+   input rst;
+   
+   input [31:0] input_a;
+   input [31:0] input_b;
+   input [31:0] input_c;
+   input [31:0] input_d;
+   
+   input     op1_input_STB;
+   output    op1_BUSY;
+  
+   output    [31:0] output_result;
+  
+   output    op1_output_STB;
+   input     output_module_BUSY;
+   
+
+
+reg mult_input_STB1, mult_BUSY1;
+reg [31:0] result1;
+reg output_STB1, output_BUSY1;
+reg [31:0] a, b;
+
+
+
+wire [31:0] output_result_reg_w;
+wire adder_BUSY_w, adder_output_STB_w;
+wire mult_BUSY1_w, mult_input_STB1_w, output_STB1_w, output_STB2_w;
+wire [31:0] result1_w;
+wire mult_BUSY2_w, mult_input_STB2_w;
+wire [31:0] result2_w;
+multiplier_fp32 mult_inst1 (
+        .input_a(a),
+        .input_b(b),
+        .mult_input_STB(mult_input_STB1),
+        .mult_BUSY(mult_BUSY1_w),
+        .clk(clk),
+        .rst(rst),
+        .output_mult(result1_w),
+        .mult_output_STB(output_STB1_w),
+        .output_module_BUSY(output_BUSY1)
+		);
+
+reg mult_input_STB2, mult_BUSY2;
+reg [31:0] result2;
+reg output_STB2, output_BUSY2;
+reg [31:0] c, d;
+multiplier_fp32 mult_inst2 (
+        .input_a(c),
+        .input_b(d),
+        .mult_input_STB(mult_input_STB2),
+        .mult_BUSY(mult_BUSY2_w),
+        .clk(clk),
+        .rst(rst),
+        .output_mult(result2_w),
+        .mult_output_STB(output_STB2_w),
+        .output_module_BUSY(output_BUSY2)
+		);
+
+reg adder_input_STB, adder_BUSY;
+reg [31:0] output_result_reg;
+reg adder_output_STB, adder_output_module_BUSY;
+reg [31:0] result1_reg, result2_reg;
+
+adder_fp32 adder_inst
+        (
+        .input_a(result1_reg),
+        .input_b(result2_reg),
+		.adder_input_STB(adder_input_STB),
+		.adder_BUSY(adder_BUSY_w),
+        .clk(clk),
+        .rst(rst),
+		.output_sum(output_result_reg_w),
+        .adder_output_STB(adder_output_STB_w),
+        .output_module_BUSY(adder_output_module_BUSY)
+		);
+
+
+//reg [31:0] a,b,c,d;
+//reg mult_input_STB1, mult_input_STB2;
+reg op1_BUSY_reg, op1_output_STB_reg;
+reg [31:0] output_result_temp;
+
+assign output_result = output_result_temp; 
+assign op1_output_STB =  op1_output_STB_reg;
+assign op1_BUSY = op1_BUSY_reg;
+
+
+
+
+
+
+
+
+parameter  get_a_b_start_mult = 3'b000;
+parameter  deassert_mult_input_STB1 = 3'b001;
+parameter  wait_for_mult1_comp = 3'b010;
+parameter  get_c_d_start_mult = 3'b011;
+parameter  wait_for_mult2_comp = 3'b100;
+parameter  start_add = 3'b101;
+parameter  finish = 3'b110;
+parameter  wait_for_add_comp = 3'b111;
+
+ 
+
+reg [2:0] current_state;
+
+always@(posedge clk)
+begin
+	adder_output_STB = adder_output_STB_w;
+ adder_BUSY = adder_BUSY_w;
+ output_result_reg = output_result_reg_w;
+
+ result1 = result1_w;
+ result2 = result2_w;
+ mult_BUSY1 = mult_BUSY1_w;
+ mult_BUSY2 = mult_BUSY2_w;
+ output_STB1 = output_STB1_w;
+ output_STB2 = output_STB2_w;
+if(!rst)
+begin
+case(current_state)
+
+  
+get_a_b_start_mult:
+  begin
+    op1_BUSY_reg <= 0;
+    if(op1_input_STB && !op1_BUSY_reg)
+    begin
+    a<= input_a;
+    b<= input_b;
+    mult_input_STB1 <= 1'b1;
+    op1_BUSY_reg <= 1'b1;
+    //$display("debug1");
+    current_state <= deassert_mult_input_STB1;
+    end
+  end
+  
+deassert_mult_input_STB1:
+  begin
+    if(mult_input_STB1 && mult_BUSY1)
+      begin
+        //$display("debug2");
+        mult_input_STB1 <= 1'b0;
+        output_BUSY1 <= 1'b0;
+        current_state <= wait_for_mult1_comp;
+      end
+    end
+ 
+  
+wait_for_mult1_comp:
+  begin
+    if(output_STB1 && !output_BUSY1)
+      begin
+        result1_reg <= result1;
+        output_BUSY1 <= 1'b1;
+        current_state <= get_c_d_start_mult;
+      end
+  end
+
+get_c_d_start_mult:
+  begin
+    c<= input_c;
+    d<= input_d;
+    mult_input_STB2<=1'b1;
+    if(mult_input_STB2 && mult_BUSY2)
+      begin
+        mult_input_STB2 <= 1'b0;
+        output_BUSY2<= 1'b0;
+        current_state <= wait_for_mult2_comp;
+      end
+  end
+
+wait_for_mult2_comp:
+  begin
+    if(output_STB2 && !output_BUSY2)
+      begin
+        result2_reg <= result2;
+        output_BUSY2 <= 1'b1;
+        current_state <= start_add;
+      end
+  end
+
+start_add:
+begin
+    adder_input_STB <= 1'b1;
+    if(adder_input_STB && !adder_BUSY)
+      begin
+        adder_input_STB <= 1'b0;
+        adder_output_module_BUSY <= 1'b0;
+        current_state <= wait_for_add_comp;
+      end
+end
+
+wait_for_add_comp:
+    begin
+      if(adder_output_STB && !adder_output_module_BUSY)
+        begin
+            op1_output_STB_reg <= 1'b1;
+            output_result_temp <= output_result_reg;
+            adder_output_module_BUSY <= 1'b1;
+            current_state <= finish;
+        end
+    end
+
+finish:
+  begin
+    if(op1_output_STB_reg && !output_module_BUSY)
+      begin
+        op1_output_STB_reg <= 1'b0;
+        current_state <= get_a_b_start_mult;
+      end
+  end
+
+endcase
+
+end
+
+if(rst)
+begin
+op1_BUSY_reg <= 0;
+op1_output_STB_reg <= 0;
+adder_input_STB <= 0;
+mult_input_STB1 <= 0;
+mult_input_STB2 <= 0;
+current_state <= get_a_b_start_mult;
+end
+    
+end
+
+
+endmodule 
+module divider_fp32(
+        input_a,
+        input_b,
+        div_input_STB,
+	      div_BUSY,
+        clk,
+        rst,
+        output_div,
+        div_output_STB,
+        output_module_BUSY
+        );
+
+  input     clk;
+  input     rst;
+
+  input     [31:0] input_a;
+  input     [31:0] input_b;
+
+  input     div_input_STB;
+  output    div_BUSY;
+  
+
+  output    [31:0] output_div;
+  output    div_output_STB;
+  input     output_module_BUSY;
+
+  //Intermediate registers
+  reg       div_output_STB_reg;
+  reg       [31:0] output_div_reg;
+  reg       div_BUSY_reg;
+
+  reg       [3:0] div_state;
+  parameter get_a_and_b   = 4'd0,
+            unpack        = 4'd1,
+            special_cases = 4'd2,
+            normalise_a   = 4'd3,
+            normalise_b   = 4'd4,
+            divide_0      = 4'd5,
+            divide_1      = 4'd6,
+            divide_2      = 4'd7,
+            divide_3      = 4'd8,
+            normalise_1   = 4'd9,
+            normalise_2   = 4'd10,
+            round         = 4'd11,
+            pack          = 4'd12,
+            put_z         = 4'd13;
+
+  reg       [31:0] a, b, z;
+  reg       [23:0] a_m, b_m, z_m;
+  reg       [9:0] a_e, b_e, z_e;
+  reg       a_s, b_s, z_s;
+  reg       guard, round_bit, sticky;
+  reg       [50:0] quotient, divisor, dividend, remainder;
+  reg       [5:0] count;
+
+  always @(posedge clk)
+  begin
+
+    case(div_state)
+
+
+      get_a_and_b: //Initial state wait for valid inputs and make BUSY = 0 because it has finished previous operation 
+      begin
+        div_BUSY_reg <= 0;
+        if (!(div_BUSY_reg) && div_input_STB) begin  //Once it gets valid input take that input and start processing.
+          a <= input_a;
+          b <= input_b;
+          div_BUSY_reg <= 1; //Turn the BUSY signal on, BUSY = 1 because now it will be busy processing latched inputs and can no more take inputs even if it is valid. 
+          div_state <= unpack;
+        end
+      end
+
+
+      unpack:
+      begin
+        a_m <= a[22 : 0];
+        b_m <= b[22 : 0];
+        a_e <= a[30 : 23] - 127;
+        b_e <= b[30 : 23] - 127;
+        a_s <= a[31];
+        b_s <= b[31];
+        div_state <= special_cases;
+      end
+
+      special_cases:
+      begin
+        //if a is NaN or b is NaN return NaN 
+        if ((a_e == 128 && a_m != 0) || (b_e == 128 && b_m != 0)) begin
+          z[31] <= 1;
+          z[30:23] <= 255;
+          z[22] <= 1;
+          z[21:0] <= 0;
+          div_state <= put_z;
+          //if a is inf and b is inf return NaN 
+        end else if ((a_e == 128) && (b_e == 128)) begin
+          z[31] <= 1;
+          z[30:23] <= 255;
+          z[22] <= 1;
+          z[21:0] <= 0;
+          div_state <= put_z;
+        //if a is inf return inf
+        end else if (a_e == 128) begin
+          z[31] <= a_s ^ b_s;
+          z[30:23] <= 255;
+          z[22:0] <= 0;
+          div_state <= put_z;
+           //if b is zero return NaN
+          if ($signed(b_e == -127) && (b_m == 0)) begin
+            z[31] <= 1;
+            z[30:23] <= 255;
+            z[22] <= 1;
+            z[21:0] <= 0;
+            div_state <= put_z;
+          end
+        //if b is inf return zero
+        end else if (b_e == 128) begin
+          z[31] <= a_s ^ b_s;
+          z[30:23] <= 0;
+          z[22:0] <= 0;
+          div_state <= put_z;
+        //if a is zero return zero
+        end else if (($signed(a_e) == -127) && (a_m == 0)) begin
+          z[31] <= a_s ^ b_s;
+          z[30:23] <= 0;
+          z[22:0] <= 0;
+          div_state <= put_z;
+           //if b is zero return NaN
+          if (($signed(b_e) == -127) && (b_m == 0)) begin
+            z[31] <= 1;
+            z[30:23] <= 255;
+            z[22] <= 1;
+            z[21:0] <= 0;
+            div_state <= put_z;
+          end
+        //if b is zero return inf
+        end else if (($signed(b_e) == -127) && (b_m == 0)) begin
+          z[31] <= a_s ^ b_s;
+          z[30:23] <= 255;
+          z[22:0] <= 0;
+          div_state <= put_z;
+        end else begin
+          //Denormalised Number
+          if ($signed(a_e) == -127) begin
+            a_e <= -126;
+          end else begin
+            a_m[23] <= 1;
+          end
+          //Denormalised Number
+          if ($signed(b_e) == -127) begin
+            b_e <= -126;
+          end else begin
+            b_m[23] <= 1;
+          end
+          div_state <= normalise_a;
+        end
+      end
+
+      normalise_a:
+      begin
+        if (a_m[23]) begin
+          div_state <= normalise_b;
+        end else begin
+          a_m <= a_m << 1;
+          a_e <= a_e - 1;
+        end
+      end
+
+      normalise_b:
+      begin
+        if (b_m[23]) begin
+          div_state <= divide_0;
+        end else begin
+          b_m <= b_m << 1;
+          b_e <= b_e - 1;
+        end
+      end
+
+      divide_0:
+      begin
+        z_s <= a_s ^ b_s;
+        z_e <= a_e - b_e;
+        quotient <= 0;
+        remainder <= 0;
+        count <= 0;
+        dividend <= a_m << 27;
+        divisor <= b_m;
+        div_state <= divide_1;
+      end
+
+      divide_1:
+      begin
+        quotient <= quotient << 1;
+        remainder <= remainder << 1;
+        remainder[0] <= dividend[50];
+        dividend <= dividend << 1;
+        div_state <= divide_2;
+      end
+
+      divide_2:
+      begin
+        if (remainder >= divisor) begin
+          quotient[0] <= 1;
+          remainder <= remainder - divisor;
+        end
+        if (count == 49) begin
+          div_state <= divide_3;
+        end else begin
+          count <= count + 1;
+          div_state <= divide_1;
+        end
+      end
+
+      divide_3:
+      begin
+        z_m <= quotient[26:3];
+        guard <= quotient[2];
+        round_bit <= quotient[1];
+        sticky <= quotient[0] | (remainder != 0);
+        div_state <= normalise_1;
+      end
+
+      normalise_1:
+      begin
+        if (z_m[23] == 0 && $signed(z_e) > -126) begin
+          z_e <= z_e - 1;
+          z_m <= z_m << 1;
+          z_m[0] <= guard;
+          guard <= round_bit;
+          round_bit <= 0;
+        end else begin
+          div_state <= normalise_2;
+        end
+      end
+
+      normalise_2:
+      begin
+        if ($signed(z_e) < -126) begin
+          z_e <= z_e + 1;
+          z_m <= z_m >> 1;
+          guard <= z_m[0];
+          round_bit <= guard;
+          sticky <= sticky | round_bit;
+        end else begin
+          div_state <= round;
+        end
+      end
+
+      round:
+      begin
+        if (guard && (round_bit | sticky | z_m[0])) begin
+          z_m <= z_m + 1;
+          if (z_m == 24'hffffff) begin
+            z_e <=z_e + 1;
+          end
+        end
+        div_state <= pack;
+      end
+
+      pack:
+      begin
+        z[22 : 0] <= z_m[22:0];
+        z[30 : 23] <= z_e[7:0] + 127;
+        z[31] <= z_s;
+        if ($signed(z_e) == -126 && z_m[23] == 0) begin
+          z[30 : 23] <= 0;
+        end
+        //if overflow occurs, return inf
+        if ($signed(z_e) > 127) begin
+          z[22 : 0] <= 0;
+          z[30 : 23] <= 255;
+          z[31] <= z_s;
+        end
+        div_state <= put_z;
+      end
+      
+      put_z: //Final state valid output is ready , make the output STB/VALID = 1, put valid output.
+      begin
+        div_output_STB_reg <= 1;
+        output_div_reg <= z;
+        if (div_output_STB_reg && !(output_module_BUSY)) begin //Once output module is no more BUSY it lowers it's busy signal and output is then taken by next module.
+          div_output_STB_reg <= 0; //Output is no more valid.
+          div_state <= get_a_and_b; //Go back to initial state.
+        end
+      end
+
+    endcase
+    
+    if (rst == 1) begin //At Active high reset, module is no more BUSY, go to initial state and wait for valid inputs. Input is don't care and output is don't care , so output VALID/STB = 0.
+      div_state <= get_a_and_b;
+      div_BUSY_reg <= 0; 
+      div_output_STB_reg <= 0;
+    end
+
+  end
+
+   
+   `ifdef SYNTHESIS_OFF //Purely combinational logic for debugging purpose, based on hexadecimal encoded states it will show named states in waveform 
+   //see this register "div_statename" in ASCII in dump
+  reg [8*13:0] div_statename;//Highest 13 Number of ASCII letters each 8 bits.
+  always@* begin
+    case (1'b1)
+      (div_state === get_a_and_b)  : div_statename = "GET_A_AND_B";
+      (div_state === unpack)       : div_statename = "UNPACK";
+      (div_state === special_cases): div_statename = "SPECIAL_CASES";//13 ASCII letters
+      (div_state === normalise_a)  : div_statename = "NORMALISE_A";
+      (div_state === normalise_b)  : div_statename = "NORMALISE_B";
+      (div_state === divide_0)     : div_statename = "DIVIDE_0";
+      (div_state === divide_1)     : div_statename = "DIVIDE_1";
+      (div_state === divide_2)     : div_statename = "DIVIDE_2";
+      (div_state === divide_3)     : div_statename = "DIVIDE_3";
+      (div_state === normalise_1)  : div_statename = "NORMALIZE_1";
+      (div_state === normalise_2)  : div_statename = "NORMALIZE_2";
+      (div_state === round)        : div_statename = "ROUND";
+      (div_state === pack)         : div_statename = "PACK";
+      (div_state === put_z)        : div_statename = "PUT_Z";
+    endcase
+  end//always
+  `endif
+
+
+  //Continuous assignments
+  
+  assign div_BUSY = div_BUSY_reg;
+  assign div_output_STB = div_output_STB_reg;
+  assign output_div = output_div_reg;
+
+endmodule
+
+
+module divider_bf16(
+        input_a,
+        input_b,
+        div_input_STB,
+	      div_BUSY,
+        clk,
+        rst,
+        output_div,
+        div_output_STB,
+        output_module_BUSY
+        );
+
+  input     clk;
+  input     rst;
+
+  input     [15:0] input_a;
+  input     [15:0] input_b;
+
+  input     div_input_STB;
+  output    div_BUSY;
+  
+
+  output    [15:0] output_div;
+  output    div_output_STB;
+  input     output_module_BUSY;
+
+  //Intermediate registers
+  reg       div_output_STB_reg;
+  reg       [15:0] output_div_reg;
+  reg       div_BUSY_reg;
+
+  reg       [3:0] div_state;
+  parameter get_a_and_b   = 4'd0,
+            unpack        = 4'd1,
+            special_cases = 4'd2,
+            normalise_a   = 4'd3,
+            normalise_b   = 4'd4,
+            divide_0      = 4'd5,
+            divide_1      = 4'd6,
+            divide_2      = 4'd7,
+            divide_3      = 4'd8,
+            normalise_1   = 4'd9,
+            normalise_2   = 4'd10,
+            round         = 4'd11,
+            pack          = 4'd12,
+            put_z         = 4'd13;
+
+  reg       [15:0] a, b, z;
+  reg       [7:0] a_m, b_m, z_m;
+  reg       [9:0] a_e, b_e, z_e;
+  reg       a_s, b_s, z_s;
+  reg       guard, round_bit, sticky;
+  reg       [50:0] quotient, divisor, dividend, remainder;
+  reg       [5:0] count;
+
+  always @(posedge clk)
+  begin
+
+    case(div_state)
+
+
+      get_a_and_b: //Initial state wait for valid inputs and make BUSY = 0 because it has finished previous operation 
+      begin
+        div_BUSY_reg <= 0;
+        if (!(div_BUSY_reg) && div_input_STB) begin  //Once it gets valid input take that input and start processing.
+          a <= {input_a};
+          b <= {input_b};
+          div_BUSY_reg <= 1; //Turn the BUSY signal on, BUSY = 1 because now it will be busy processing latched inputs and can no more take inputs even if it is valid. 
+          div_state <= unpack;
+        end
+      end
+
+
+      unpack:
+      begin
+        a_m <= a[6 : 0];
+        b_m <= b[6 : 0];
+        a_e <= a[14 : 7] - 127;
+        b_e <= b[14 : 7] - 127;
+        a_s <= a[15];
+        b_s <= b[15];
+        div_state <= special_cases;
+      end
+
+      special_cases:
+      begin
+        //if a is NaN or b is NaN return NaN 
+        if ((a_e == 128 && a_m != 0) || (b_e == 128 && b_m != 0)) begin
+          z[15] <= 1;
+          z[14:7] <= 255;
+          z[6] <= 1;
+          z[5:0] <= 0;
+          div_state <= put_z;
+          //if a is inf and b is inf return NaN 
+        end else if ((a_e == 128) && (b_e == 128)) begin
+          z[15] <= 1;
+          z[14:7] <= 255;
+          z[6] <= 1;
+          z[5:0] <= 0;
+          div_state <= put_z;
+        //if a is inf return inf
+        end else if (a_e == 128) begin
+          z[15] <= a_s ^ b_s;
+          z[14:7] <= 255;
+          z[6:0] <= 0;
+          div_state <= put_z;
+           //if b is zero return NaN
+          if ($signed(b_e == -127) && (b_m == 0)) begin
+            z[15] <= 1;
+            z[14:7] <= 255;
+            z[6] <= 1;
+            z[5:0] <= 0;
+            div_state <= put_z;
+          end
+        //if b is inf return zero
+        end else if (b_e == 128) begin
+          z[15] <= a_s ^ b_s;
+          z[14:7] <= 0;
+          z[6:0] <= 0;
+          div_state <= put_z;
+        //if a is zero return zero
+        end else if (($signed(a_e) == -127) && (a_m == 0)) begin
+          z[15] <= a_s ^ b_s;
+          z[14:7] <= 0;
+          z[6:0] <= 0;
+          div_state <= put_z;
+           //if b is zero return NaN
+          if (($signed(b_e) == -127) && (b_m == 0)) begin
+            z[15] <= 1;
+            z[14:7] <= 255;
+            z[6] <= 1;
+            z[5:0] <= 0;
+            div_state <= put_z;
+          end
+        //if b is zero return inf
+        end else if (($signed(b_e) == -127) && (b_m == 0)) begin
+          z[15] <= a_s ^ b_s;
+          z[14:7] <= 255;
+          z[6:0] <= 0;
+          div_state <= put_z;
+        end else begin
+          //Denormalised Number
+          if ($signed(a_e) == -127) begin
+            a_e <= -126;
+          end else begin
+            a_m[7] <= 1;
+          end
+          //Denormalised Number
+          if ($signed(b_e) == -127) begin
+            b_e <= -126;
+          end else begin
+            b_m[7] <= 1;
+          end
+          div_state <= normalise_a;
+        end
+      end
+
+      normalise_a:
+      begin
+        if (a_m[7]) begin
+          div_state <= normalise_b;
+        end else begin
+          a_m <= a_m << 1;
+          a_e <= a_e - 1;
+        end
+      end
+
+      normalise_b:
+      begin
+        if (b_m[7]) begin
+          div_state <= divide_0;
+        end else begin
+          b_m <= b_m << 1;
+          b_e <= b_e - 1;
+        end
+      end
+
+      divide_0:
+      begin
+        z_s <= a_s ^ b_s;
+        z_e <= a_e - b_e;
+        quotient <= 0;
+        remainder <= 0;
+        count <= 0;
+        dividend <= a_m << 27;
+        divisor <= b_m;
+        div_state <= divide_1;
+      end
+
+      divide_1:
+      begin
+        quotient <= quotient << 1;
+        remainder <= remainder << 1;
+        remainder[0] <= dividend[50];
+        dividend <= dividend << 1;
+        div_state <= divide_2;
+      end
+
+      divide_2:
+      begin
+        if (remainder >= divisor) begin
+          quotient[0] <= 1;
+          remainder <= remainder - divisor;
+        end
+        if (count == 49) begin
+          div_state <= divide_3;
+        end else begin
+          count <= count + 1;
+          div_state <= divide_1;
+        end
+      end
+
+      divide_3:
+      begin
+        z_m <= quotient[26:3];
+        guard <= quotient[2];
+        round_bit <= quotient[1];
+        sticky <= quotient[0] | (remainder != 0);
+        div_state <= normalise_1;
+      end
+
+      normalise_1:
+      begin
+        if (z_m[7] == 0 && $signed(z_e) > -126) begin
+          z_e <= z_e - 1;
+          z_m <= z_m << 1;
+          z_m[0] <= guard;
+          guard <= round_bit;
+          round_bit <= 0;
+        end else begin
+          div_state <= normalise_2;
+        end
+      end
+
+      normalise_2:
+      begin
+        if ($signed(z_e) < -126) begin
+          z_e <= z_e + 1;
+          z_m <= z_m >> 1;
+          guard <= z_m[0];
+          round_bit <= guard;
+          sticky <= sticky | round_bit;
+        end else begin
+          div_state <= round;
+        end
+      end
+
+      round:
+      begin
+        if (guard && (round_bit | sticky | z_m[0])) begin
+          z_m <= z_m + 1;
+          if (z_m == 8'hff) begin
+            z_e <=z_e + 1;
+          end
+        end
+        div_state <= pack;
+      end
+
+      pack:
+      begin
+        z[6 : 0] <= z_m[6:0];
+        z[14 : 7] <= z_e[7:0] + 127;
+        z[15] <= z_s;
+        if ($signed(z_e) == -126 && z_m[7] == 0) begin
+          z[14 : 7] <= 0;
+        end
+        //if overflow occurs, return inf
+        if ($signed(z_e) > 127) begin
+          z[6 : 0] <= 0;
+          z[14 : 7] <= 255;
+          z[15] <= z_s;
+        end
+        div_state <= put_z;
+      end
+      
+      put_z: //Final state valid output is ready , make the output STB/VALID = 1, put valid output.
+      begin
+        div_output_STB_reg <= 1;
+        output_div_reg <= z;
+        if (div_output_STB_reg && !(output_module_BUSY)) begin //Once output module is no more BUSY it lowers it's busy signal and output is then taken by next module.
+          div_output_STB_reg <= 0; //Output is no more valid.
+          div_state <= get_a_and_b; //Go back to initial state.
+        end
+      end
+
+    endcase
+    
+    if (rst == 1) begin //At Active high reset, module is no more BUSY, go to initial state and wait for valid inputs. Input is don't care and output is don't care , so output VALID/STB = 0.
+      div_state <= get_a_and_b;
+      div_BUSY_reg <= 0; 
+      div_output_STB_reg <= 0;
+    end
+
+  end
+
+   
+   `ifdef SYNTHESIS_OFF //Purely combinational logic for debugging purpose, based on hexadecimal encoded states it will show named states in waveform 
+   //see this register "div_statename" in ASCII in dump
+  reg [8*13:0] div_statename;//Highest 13 Number of ASCII letters each 8 bits.
+  always@* begin
+    case (1'b1)
+      (div_state === get_a_and_b)  : div_statename = "GET_A_AND_B";
+      (div_state === unpack)       : div_statename = "UNPACK";
+      (div_state === special_cases): div_statename = "SPECIAL_CASES";//13 ASCII letters
+      (div_state === normalise_a)  : div_statename = "NORMALISE_A";
+      (div_state === normalise_b)  : div_statename = "NORMALISE_B";
+      (div_state === divide_0)     : div_statename = "DIVIDE_0";
+      (div_state === divide_1)     : div_statename = "DIVIDE_1";
+      (div_state === divide_2)     : div_statename = "DIVIDE_2";
+      (div_state === divide_3)     : div_statename = "DIVIDE_3";
+      (div_state === normalise_1)  : div_statename = "NORMALIZE_1";
+      (div_state === normalise_2)  : div_statename = "NORMALIZE_2";
+      (div_state === round)        : div_statename = "ROUND";
+      (div_state === pack)         : div_statename = "PACK";
+      (div_state === put_z)        : div_statename = "PUT_Z";
+    endcase
+  end//always
+  `endif
+
+
+  //Continuous assignments
+  
+  assign div_BUSY = div_BUSY_reg;
+  assign div_output_STB = div_output_STB_reg;
+  assign output_div = output_div_reg[15:0];
+
+endmodule
+
+module adder_bf16(
+        input_a,
+        input_b,
+		    adder_input_STB,
+		    adder_BUSY,
+        clk,
+        rst,
+		    output_sum,
+        adder_output_STB,
+        output_module_BUSY
+		        );
+
+  input     clk;
+  input     rst;
+
+  input     [15:0] input_a;
+
+  input     [15:0] input_b;
+  
+  input     adder_input_STB;
+  output    adder_BUSY;
+  
+  output    [15:0] output_sum;
+  
+  output    adder_output_STB;
+  input     output_module_BUSY;
+
+  //Intermediate registers
+  reg       adder_output_STB_reg;
+  reg       [31:0] output_sum_reg;
+  reg       adder_BUSY_reg;
+
+  reg       [3:0] adder_state;
+  
+  parameter get_a_and_b   = 4'd0,
+            unpack        = 4'd1,
+            special_cases = 4'd2,
+            align         = 4'd3,
+            add_0         = 4'd4,
+            add_1         = 4'd5,
+            normalise_1   = 4'd6,
+            normalise_2   = 4'd7,
+            round         = 4'd8,
+            pack          = 4'd9,
+            put_z         = 4'd10;
+
+  reg       [15:0] a, b, z;
+  reg       [9:0] a_m, b_m;
+  reg       [7:0] z_m;
+  reg       [9:0] a_e, b_e, z_e;
+  reg       a_s, b_s, z_s;
+  reg       guard, round_bit, sticky;
+  reg       [27:0] sum;
+
+  always @(posedge clk)
+  begin
+
+    case(adder_state)
+
+      get_a_and_b: //Initial state wait for valid inputs and make BUSY = 0 because it has finished previous operation 
+      begin
+        adder_BUSY_reg <= 0;
+        if (!(adder_BUSY_reg) && adder_input_STB) begin  //Once it gets valid input take that input and start processing.
+          a <= {input_a};
+		      b <= {input_b};
+          adder_BUSY_reg <= 1; //Turn the BUSY signal on, BUSY = 1 because now it will be busy processing latched inputs and can no more take inputs even if it is valid. 
+          adder_state <= unpack;
+        end
+      end
+
+
+      unpack:
+      begin
+        a_m <= {a[6 : 0], 3'd0};
+        b_m <= {b[6 : 0], 3'd0};
+        a_e <= a[14 : 7] - 127;
+        b_e <= b[14 : 7] - 127;
+        a_s <= a[15];
+        b_s <= b[15];
+        adder_state <= special_cases;
+      end
+
+      special_cases:
+      begin
+        //if a is NaN or b is NaN return NaN 
+        if ((a_e == 128 && a_m != 0) || (b_e == 128 && b_m != 0)) begin
+          z[15] <= 1;
+          z[14:7] <= 255;
+          z[6] <= 1;
+          z[5:0] <= 0;
+          adder_state <= put_z;
+        //if a is inf return inf
+        end else if (a_e == 128) begin
+          z[15] <= a_s;
+          z[14:7] <= 255;
+          z[6:0] <= 0;
+          //if a is inf and signs don't match return nan
+          if ((b_e == 128) && (a_s != b_s)) begin
+              z[15] <= b_s;
+              z[14:7] <= 255;
+              z[6] <= 1;
+              z[5:0] <= 0;
+          end
+          adder_state <= put_z;
+        //if b is inf return inf
+        end else if (b_e == 128) begin
+          z[15] <= b_s;
+          z[14:7] <= 255;
+          z[6:0] <= 0;
+          adder_state <= put_z;
+        //if a is zero return b
+        end else if ((($signed(a_e) == -127) && (a_m == 0)) && (($signed(b_e) == -127) && (b_m == 0))) begin
+          z[15] <= a_s & b_s;
+          z[14:7] <= b_e[7:0] + 127;
+          z[6:0] <= b_m[9:3];
+          adder_state <= put_z;
+        //if a is zero return b
+        end else if (($signed(a_e) == -127) && (a_m == 0)) begin
+          z[15] <= b_s;
+          z[14:7] <= b_e[7:0] + 127;
+          z[6:0] <= b_m[9:3];
+          adder_state <= put_z;
+        //if b is zero return a
+        end else if (($signed(b_e) == -127) && (b_m == 0)) begin
+          z[15] <= a_s;
+          z[14:7] <= a_e[7:0] + 127;
+          z[6:0] <= a_m[9:3];
+          adder_state <= put_z;
+        end else begin
+          //Denormalised Number
+          if ($signed(a_e) == -127) begin
+            a_e <= -126;
+          end else begin
+            a_m[9] <= 1;
+          end
+          //Denormalised Number
+          if ($signed(b_e) == -127) begin
+            b_e <= -126;
+          end else begin
+            b_m[9] <= 1;
+          end
+          adder_state <= align;
+        end
+      end
+
+      align:
+      begin
+        if ($signed(a_e) > $signed(b_e)) begin
+          b_e <= b_e + 1;
+          b_m <= b_m >> 1;
+          b_m[0] <= b_m[0] | b_m[1];
+        end else if ($signed(a_e) < $signed(b_e)) begin
+          a_e <= a_e + 1;
+          a_m <= a_m >> 1;
+          a_m[0] <= a_m[0] | a_m[1];
+        end else begin
+          adder_state <= add_0;
+        end
+      end
+
+      add_0:
+      begin
+        z_e <= a_e;
+        if (a_s == b_s) begin
+          sum <= a_m + b_m;
+          z_s <= a_s;
+        end else begin
+          if (a_m >= b_m) begin
+            sum <= a_m - b_m;
+            z_s <= a_s;
+          end else begin
+            sum <= b_m - a_m;
+            z_s <= b_s;
+          end
+        end
+        adder_state <= add_1;
+      end
+
+      add_1:
+      begin
+        if (sum[27]) begin
+          z_m <= sum[27:4];
+          guard <= sum[3];
+          round_bit <= sum[2];
+          sticky <= sum[1] | sum[0];
+          z_e <= z_e + 1;
+        end else begin
+          z_m <= sum[26:3];
+          guard <= sum[2];
+          round_bit <= sum[1];
+          sticky <= sum[0];
+        end
+        adder_state <= normalise_1;
+      end
+
+      normalise_1:
+      begin
+        if (z_m[7] == 0 && $signed(z_e) > -126) begin
+          z_e <= z_e - 1;
+          z_m <= z_m << 1;
+          z_m[0] <= guard;
+          guard <= round_bit;
+          round_bit <= 0;
+        end else begin
+          adder_state <= normalise_2;
+        end
+      end
+
+      normalise_2:
+      begin
+        if ($signed(z_e) < -126) begin
+          z_e <= z_e + 1;
+          z_m <= z_m >> 1;
+          guard <= z_m[0];
+          round_bit <= guard;
+          sticky <= sticky | round_bit;
+        end else begin
+          adder_state <= round;
+        end
+      end
+
+      round:
+      begin
+        if (guard && (round_bit | sticky | z_m[0])) begin
+          z_m <= z_m + 1;
+          if (z_m == 8'hff) begin
+            z_e <=z_e + 1;
+          end
+        end
+        adder_state <= pack;
+      end
+
+      pack:
+      begin
+        z[6 : 0] <= z_m[6:0];
+        z[14 : 7] <= z_e[7:0] + 127;
+        z[15] <= z_s;
+        if ($signed(z_e) == -126 && z_m[7] == 0) begin
+          z[14 : 7] <= 0;
+        end
+        if ($signed(z_e) == -126 && z_m[7:0] == 28'h0) begin
+          z[15] <= 1'b0; // FIX SIGN BUG: -a + a = +0.
+        end
+        //if overflow occurs, return inf
+        if ($signed(z_e) > 127) begin
+          z[6 : 0] <= 0;
+          z[14 : 7] <= 255;
+          z[15] <= z_s;
+        end
+        adder_state <= put_z;
+      end
+
+      put_z: //Final state valid output is ready , make the output STB/VALID = 1, put valid output.
+      begin
+        adder_output_STB_reg <= 1;
+        output_sum_reg <= z;
+        if (adder_output_STB_reg && !(output_module_BUSY)) begin //Once output module is no more BUSY it lowers it's busy signal and output is then taken by next module.
+          adder_output_STB_reg <= 0; //Output is no more valid.
+          adder_state <= get_a_and_b; //Go back to initial state.
+        end
+      end
+
+    endcase
+
+    if (rst == 1) begin //At Active high reset, module is no more BUSY, go to initial state and wait for valid inputs. Input is don't care and output is don't care , so output VALID/STB = 0.
+      adder_state <= get_a_and_b;
+      adder_BUSY_reg <= 0; 
+      adder_output_STB_reg <= 0;
+    end
+
+  end
+  
+  `ifdef SYNTHESIS_OFF //Purely combinational logic for debugging purpose, based on hexadecimal encoded states it will show named states in waveform 
+  //see this register "adder_statename" in ASCII in dump
+  reg [8*13:0] adder_statename;//Highest 13 Number of ASCII letters each 8 bits.
+  always@* begin
+    case (1'b1)
+      (adder_state === get_a_and_b)  : adder_statename = "GET_A_AND_B";
+      (adder_state === unpack)       : adder_statename = "UNPACK";
+      (adder_state === special_cases): adder_statename = "SPECIAL_CASES";//13 ASCII letters
+      (adder_state === align)        : adder_statename = "ALIGN";
+      (adder_state === add_0)        : adder_statename = "ADD_0";
+      (adder_state === add_1)        : adder_statename = "ADD_1";
+      (adder_state === normalise_1)  : adder_statename = "NORMALIZE_1";
+      (adder_state === normalise_2)  : adder_statename = "NORMALIZE_2";
+      (adder_state === round)        : adder_statename = "ROUND";
+      (adder_state === pack)         : adder_statename = "PACK";
+      (adder_state === put_z)        : adder_statename = "PUT_Z";
+    endcase
+  end//always
+  `endif
+
+  //Continuous assignments
+  
+  assign adder_BUSY = adder_BUSY_reg;
+  assign adder_output_STB = adder_output_STB_reg;
+  assign output_sum = output_sum_reg[15:0];
+
+endmodule
+
+module adder_fp32(
+        input_a,
+        input_b,
+		    adder_input_STB,
+		    adder_BUSY,
+        clk,
+        rst,
+		    output_sum,
+        adder_output_STB,
+        output_module_BUSY
+		        );
+
+  input     clk;
+  input     rst;
+
+  input     [31:0] input_a;
+
+  input     [31:0] input_b;
+  
+  input     adder_input_STB;
+  output    adder_BUSY;
+  
+  output    [31:0] output_sum;
+  
+  output    adder_output_STB;
+  input     output_module_BUSY;
+
+  //Intermediate registers
+  reg       adder_output_STB_reg;
+  reg       [31:0] output_sum_reg;
+  reg       adder_BUSY_reg;
+
+  reg       [3:0] adder_state;
+  
+  parameter get_a_and_b   = 4'd0,
+            unpack        = 4'd1,
+            special_cases = 4'd2,
+            align         = 4'd3,
+            add_0         = 4'd4,
+            add_1         = 4'd5,
+            normalise_1   = 4'd6,
+            normalise_2   = 4'd7,
+            round         = 4'd8,
+            pack          = 4'd9,
+            put_z         = 4'd10;
+
+  reg       [31:0] a, b, z;
+  reg       [26:0] a_m, b_m;
+  reg       [23:0] z_m;
+  reg       [9:0] a_e, b_e, z_e;
+  reg       a_s, b_s, z_s;
+  reg       guard, round_bit, sticky;
+  reg       [27:0] sum;
+
+  always @(posedge clk)
+  begin
+
+    case(adder_state)
+
+      get_a_and_b: //Initial state wait for valid inputs and make BUSY = 0 because it has finished previous operation 
+      begin
+        adder_BUSY_reg <= 0;
+        if (!(adder_BUSY_reg) && adder_input_STB) begin  //Once it gets valid input take that input and start processing.
+          a <= input_a;
+		      b <= input_b;
+          adder_BUSY_reg <= 1; //Turn the BUSY signal on, BUSY = 1 because now it will be busy processing latched inputs and can no more take inputs even if it is valid. 
+          adder_state <= unpack;
+        end
+      end
+
+
+      unpack:
+      begin
+        a_m <= {a[22 : 0], 3'd0};
+        b_m <= {b[22 : 0], 3'd0};
+        a_e <= a[30 : 23] - 127;
+        b_e <= b[30 : 23] - 127;
+        a_s <= a[31];
+        b_s <= b[31];
+        adder_state <= special_cases;
+      end
+
+      special_cases:
+      begin
+        //if a is NaN or b is NaN return NaN 
+        if ((a_e == 128 && a_m != 0) || (b_e == 128 && b_m != 0)) begin
+          z[31] <= 1;
+          z[30:23] <= 255;
+          z[22] <= 1;
+          z[21:0] <= 0;
+          adder_state <= put_z;
+        //if a is inf return inf
+        end else if (a_e == 128) begin
+          z[31] <= a_s;
+          z[30:23] <= 255;
+          z[22:0] <= 0;
+          //if a is inf and signs don't match return nan
+          if ((b_e == 128) && (a_s != b_s)) begin
+              z[31] <= b_s;
+              z[30:23] <= 255;
+              z[22] <= 1;
+              z[21:0] <= 0;
+          end
+          adder_state <= put_z;
+        //if b is inf return inf
+        end else if (b_e == 128) begin
+          z[31] <= b_s;
+          z[30:23] <= 255;
+          z[22:0] <= 0;
+          adder_state <= put_z;
+        //if a is zero return b
+        end else if ((($signed(a_e) == -127) && (a_m == 0)) && (($signed(b_e) == -127) && (b_m == 0))) begin
+          z[31] <= a_s & b_s;
+          z[30:23] <= b_e[7:0] + 127;
+          z[22:0] <= b_m[26:3];
+          adder_state <= put_z;
+        //if a is zero return b
+        end else if (($signed(a_e) == -127) && (a_m == 0)) begin
+          z[31] <= b_s;
+          z[30:23] <= b_e[7:0] + 127;
+          z[22:0] <= b_m[26:3];
+          adder_state <= put_z;
+        //if b is zero return a
+        end else if (($signed(b_e) == -127) && (b_m == 0)) begin
+          z[31] <= a_s;
+          z[30:23] <= a_e[7:0] + 127;
+          z[22:0] <= a_m[26:3];
+          adder_state <= put_z;
+        end else begin
+          //Denormalised Number
+          if ($signed(a_e) == -127) begin
+            a_e <= -126;
+          end else begin
+            a_m[26] <= 1;
+          end
+          //Denormalised Number
+          if ($signed(b_e) == -127) begin
+            b_e <= -126;
+          end else begin
+            b_m[26] <= 1;
+          end
+          adder_state <= align;
+        end
+      end
+
+      align:
+      begin
+        if ($signed(a_e) > $signed(b_e)) begin
+          b_e <= b_e + 1;
+          b_m <= b_m >> 1;
+          b_m[0] <= b_m[0] | b_m[1];
+        end else if ($signed(a_e) < $signed(b_e)) begin
+          a_e <= a_e + 1;
+          a_m <= a_m >> 1;
+          a_m[0] <= a_m[0] | a_m[1];
+        end else begin
+          adder_state <= add_0;
+        end
+      end
+
+      add_0:
+      begin
+        z_e <= a_e;
+        if (a_s == b_s) begin
+          sum <= a_m + b_m;
+          z_s <= a_s;
+        end else begin
+          if (a_m >= b_m) begin
+            sum <= a_m - b_m;
+            z_s <= a_s;
+          end else begin
+            sum <= b_m - a_m;
+            z_s <= b_s;
+          end
+        end
+        adder_state <= add_1;
+      end
+
+      add_1:
+      begin
+        if (sum[27]) begin
+          z_m <= sum[27:4];
+          guard <= sum[3];
+          round_bit <= sum[2];
+          sticky <= sum[1] | sum[0];
+          z_e <= z_e + 1;
+        end else begin
+          z_m <= sum[26:3];
+          guard <= sum[2];
+          round_bit <= sum[1];
+          sticky <= sum[0];
+        end
+        adder_state <= normalise_1;
+      end
+
+      normalise_1:
+      begin
+        if (z_m[23] == 0 && $signed(z_e) > -126) begin
+          z_e <= z_e - 1;
+          z_m <= z_m << 1;
+          z_m[0] <= guard;
+          guard <= round_bit;
+          round_bit <= 0;
+        end else begin
+          adder_state <= normalise_2;
+        end
+      end
+
+      normalise_2:
+      begin
+        if ($signed(z_e) < -126) begin
+          z_e <= z_e + 1;
+          z_m <= z_m >> 1;
+          guard <= z_m[0];
+          round_bit <= guard;
+          sticky <= sticky | round_bit;
+        end else begin
+          adder_state <= round;
+        end
+      end
+
+      round:
+      begin
+        if (guard && (round_bit | sticky | z_m[0])) begin
+          z_m <= z_m + 1;
+          if (z_m == 24'hffffff) begin
+            z_e <=z_e + 1;
+          end
+        end
+        adder_state <= pack;
+      end
+
+      pack:
+      begin
+        z[22 : 0] <= z_m[22:0];
+        z[30 : 23] <= z_e[7:0] + 127;
+        z[31] <= z_s;
+        if ($signed(z_e) == -126 && z_m[23] == 0) begin
+          z[30 : 23] <= 0;
+        end
+        if ($signed(z_e) == -126 && z_m[23:0] == 24'h0) begin
+          z[31] <= 1'b0; // FIX SIGN BUG: -a + a = +0.
+        end
+        //if overflow occurs, return inf
+        if ($signed(z_e) > 127) begin
+          z[22 : 0] <= 0;
+          z[30 : 23] <= 255;
+          z[31] <= z_s;
+        end
+        adder_state <= put_z;
+      end
+
+      put_z: //Final state valid output is ready , make the output STB/VALID = 1, put valid output.
+      begin
+        adder_output_STB_reg <= 1;
+        output_sum_reg <= z;
+        if (adder_output_STB_reg && !(output_module_BUSY)) begin //Once output module is no more BUSY it lowers it's busy signal and output is then taken by next module.
+          adder_output_STB_reg <= 0; //Output is no more valid.
+          adder_state <= get_a_and_b; //Go back to initial state.
+        end
+      end
+
+    endcase
+
+    if (rst == 1) begin //At Active high reset, module is no more BUSY, go to initial state and wait for valid inputs. Input is don't care and output is don't care , so output VALID/STB = 0.
+      adder_state <= get_a_and_b;
+      adder_BUSY_reg <= 0; 
+      adder_output_STB_reg <= 0;
+    end
+
+  end
+  
+  `ifdef SYNTHESIS_OFF //Purely combinational logic for debugging purpose, based on hexadecimal encoded states it will show named states in waveform 
+  //see this register "adder_statename" in ASCII in dump
+  reg [8*13:0] adder_statename;//Highest 13 Number of ASCII letters each 8 bits.
+  always@* begin
+    case (1'b1)
+      (adder_state === get_a_and_b)  : adder_statename = "GET_A_AND_B";
+      (adder_state === unpack)       : adder_statename = "UNPACK";
+      (adder_state === special_cases): adder_statename = "SPECIAL_CASES";//13 ASCII letters
+      (adder_state === align)        : adder_statename = "ALIGN";
+      (adder_state === add_0)        : adder_statename = "ADD_0";
+      (adder_state === add_1)        : adder_statename = "ADD_1";
+      (adder_state === normalise_1)  : adder_statename = "NORMALIZE_1";
+      (adder_state === normalise_2)  : adder_statename = "NORMALIZE_2";
+      (adder_state === round)        : adder_statename = "ROUND";
+      (adder_state === pack)         : adder_statename = "PACK";
+      (adder_state === put_z)        : adder_statename = "PUT_Z";
+    endcase
+  end//always
+  `endif
+
+  //Continuous assignments
+  
+  assign adder_BUSY = adder_BUSY_reg;
+  assign adder_output_STB = adder_output_STB_reg;
+  assign output_sum = output_sum_reg;
+
+endmodule
+
+
+
+
+
+
+
+
+
+
+
 
 
 /***************************************************************
@@ -2521,10 +6140,10 @@ module picorv32_axi #(
 	parameter [ 0:0] COMPRESSED_ISA = 0,
 	parameter [ 0:0] CATCH_MISALIGN = 1,
 	parameter [ 0:0] CATCH_ILLINSN = 1,
-	parameter [ 0:0] ENABLE_PCPI = 0,
+	parameter [ 0:0] ENABLE_PCPI = 1,
 	parameter [ 0:0] ENABLE_MUL = 0,
 	parameter [ 0:0] ENABLE_FAST_MUL = 0,
-	parameter [ 0:0] ENABLE_DIV = 0,
+	parameter [ 0:0] ENABLE_DIV = 1,
 	parameter [ 0:0] ENABLE_IRQ = 0,
 	parameter [ 0:0] ENABLE_IRQ_QREGS = 1,
 	parameter [ 0:0] ENABLE_IRQ_TIMER = 1,
@@ -2821,7 +6440,7 @@ module picorv32_wb #(
 	parameter [ 0:0] CATCH_ILLINSN = 1,
 	parameter [ 0:0] ENABLE_PCPI = 0,
 	parameter [ 0:0] ENABLE_MUL = 0,
-	parameter [ 0:0] ENABLE_FAST_MUL = 0,
+	parameter [ 0:0] ENABLE_FAST_MUL = 1,
 	parameter [ 0:0] ENABLE_DIV = 0,
 	parameter [ 0:0] ENABLE_IRQ = 0,
 	parameter [ 0:0] ENABLE_IRQ_QREGS = 1,
